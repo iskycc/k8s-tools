@@ -1,0 +1,43 @@
+# Maven build output
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+
+# IDE and editor files
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+*.swp
+*.swo
+*~
+
+# Logs and JVM diagnostics
+*.log
+hs_err_pid*
+replay_pid*
+*.hprof
+
+# Local environment and tool state
+.env
+.env.*
+!.env.example
+!.env.sample
+/.agents/
+/.codex/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
