@@ -85,9 +85,18 @@ jobs:
             org.codehaus.mojo:versions-maven-plugin:2.22.0:set \
             -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false
 
-      - name: Test, sign and publish
+      - name: Test, sign and upload
         run: mvn --batch-mode --no-transfer-progress -Prelease clean deploy
         env:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+
+      - name: Report upload completion
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          发布包已上传到 Central Portal，后续校验和正式发布由 Central 自动处理。
+
+          Actions 成功表示构建、测试、签名和上传成功，不代表 Maven Central 已可下载。
+          后续状态与校验错误请查看 [Central Portal Deployments](https://central.sonatype.com/publishing/deployments)。
+          EOF

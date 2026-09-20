@@ -83,6 +83,7 @@ java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
 ## 文档与交付
 
 - Maven Central 正式版配置集中在 POM 的 `release` profile：正式版本检查、sources/Javadoc 附件、GPG 签名、Central Portal 部署。`snapshot` profile 使用 Maven Deploy 插件上传到 `https://central.sonatype.com/repository/maven-snapshots/`，同样生成附件和签名。两个 profile 分别使用，普通构建不需要发布凭据，不在默认构建中启用上传。
+- 正式版保留 `autoPublish=true`、`waitUntil=uploaded`，Actions 完成构建、测试、签名和上传后结束。不要把上传成功描述为已可从 Central 下载；后续校验、发布结果以 Portal 为准。
 - 正式版发布仅接受 `vX.Y.Z` 标签；标签中的 POM 版本必须为 `X.Y.Z` 或 `X.Y.Z-SNAPSHOT`，工作流在临时检出目录改为正式版本，不回写 Git。快照从 `main` 手动运行，输入版本必须为 `X.Y.Z-SNAPSHOT` 且与 POM 一致，不创建正式版标签。修改发布逻辑时保留版本检查及 `contents: read` 权限，表达式输入通过环境变量传给 shell。
 - Actions 使用固定提交 SHA。升级时核对对应 action 的真实输入参数，尤其 `setup-java` 的凭据环境变量名与 GPG 配置。
 - 发布配置变更需验证 sources/Javadoc 生成和签名流程。在独立工作副本中执行 `mvn -Prelease verify` 可生成签名产物而不上传；测试密钥使用临时 keyring，不上传公钥、不提交私钥。`-Dcentral.skipPublishing=true` 会跳过部署及产物暂存，不保证生成 bundle。仅测试包生成时可用 `-Dgpg.skip=true verify`，但这不验证签名或远端发布。

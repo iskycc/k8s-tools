@@ -7,12 +7,14 @@
 | 工作流 | 触发方式 | 执行内容 |
 | --- | --- | --- |
 | [Maven CI](../.github/workflows/ci.yml) | 推送 `main`、PR 或手动运行 | Java 8、21 上执行 `mvn clean verify`，无需发布密钥 |
-| [Publish to Maven Central](../.github/workflows/publish.yml) | 发布正式 GitHub Release，或手动指定已有标签 | 检出标签、核对版本、测试、生成源码/Javadoc、GPG 签名并发布 |
+| [Publish to Maven Central](../.github/workflows/publish.yml) | 发布正式 GitHub Release，或手动指定已有标签 | 检出标签、核对版本、测试、生成源码/Javadoc、GPG 签名并上传；上传成功后结束 |
 | [Publish Snapshot](../.github/workflows/publish-snapshot.yml) | 手动从 `main` 运行并填写预期版本 | 核对 `X.Y.Z-SNAPSHOT` 与 POM 一致、测试、生成源码/Javadoc、GPG 签名并部署快照 |
 
 正式版工作流只接受 `vX.Y.Z`，例如 `v1.1.0`。GitHub 预发布 Release 会被跳过；手动运行正式版工作流同样不接受 `SNAPSHOT`、`RC` 等后缀。单独推送标签不会触发自动发布，需发布 GitHub Release 或手动运行对应工作流。
 
-每次部署包含主 jar、`-sources.jar`、`-javadoc.jar`、POM、各自产物的 `.asc` 签名和校验和。正式版工作流等待 Portal 确认发布完成；快照工作流使用 Maven 仓库协议上传并更新快照元数据。工作流不会创建 Git 提交、推送标签或回写分支上的 POM。
+每次部署包含主 jar、`-sources.jar`、`-javadoc.jar`、POM、各自产物的 `.asc` 签名和校验和。正式版配置为 `autoPublish=true`、`waitUntil=uploaded`：上传成功后结束工作流，Central 在后台继续校验并自动发布。Actions 成功只表示构建、测试、签名和上传成功，后续校验或发布失败不会使已结束的作业变红；最终状态和错误请查看 [Central Portal Deployments](https://central.sonatype.com/publishing/deployments)。参数语义见 [官方插件说明](https://central.sonatype.org/publish/publish-portal-maven/#waituntil)。
+
+快照工作流使用 Maven 仓库协议上传并更新快照元数据。工作流不会创建 Git 提交、推送标签或回写分支上的 POM。新的结束策略适用于包含该 POM 配置的后续版本；已有发布标签仍保留当时的配置。
 
 ## 首次配置
 
@@ -97,7 +99,7 @@ gpg --armor --export-secret-keys 'YOUR_KEY_FINGERPRINT' > /tmp/k8s-tools-release
 2. 确定版本，例如 `1.1.0`。对应标签中的 `pom.xml` 版本必须是 `1.1.0` 或 `1.1.0-SNAPSHOT`。发布下一个版本前，先将开发版本更新为相应的 `X.Y.Z-SNAPSHOT`。
 3. 在 GitHub 创建并发布正式 Release，标签为 `v1.1.0`。标签必须指向包含发布配置的提交。
 4. 工作流检出 `refs/tags/v1.1.0`，核对 POM 后，只在临时检出目录将版本设为 `1.1.0`，执行 `mvn -Prelease clean deploy`。
-5. 在 Actions 查看结果，必要时到 Central Portal 的 Deployments 查看校验详情。发布后等待 Maven Central 同步，再验证消费者能解析 `io.github.iskycc:k8s-tools:1.1.0`。
+5. Actions 上传成功后即结束。在 Central Portal 的 Deployments 确认最终发布结果；发布后再验证消费者能解析 `io.github.iskycc:k8s-tools:1.1.0`。
 
 需要手动运行时，在 Actions → Publish to Maven Central → Run workflow 中输入已有标签，如 `v1.1.0`。手动运行也会自动发布，并非仅构建预览。
 
@@ -139,6 +141,6 @@ mvn --batch-mode --no-transfer-progress -Prelease clean verify
 | 快照上传返回 401/403 | 确认 token 有效、命名空间已启用 SNAPSHOTs，且环境允许 `main` 分支 |
 | Portal 签名校验 | 公钥是否已上传、可获取，是否与签名私钥对应 |
 | 版本已存在 | 查看 Portal 状态；已发布版本需递增版本号 |
-| 等待发布超时 | 先查看 Portal 状态，再决定是否重试；不要直接重复上传 |
+| Actions 成功但依赖不可下载 | 作业只等待上传；查看 Portal 是否仍在校验/发布，或是否有后续校验错误，不要直接重复上传 |
 
 Central 所需元数据和产物要求以 [官方发布要求](https://central.sonatype.org/publish/requirements/) 为准。

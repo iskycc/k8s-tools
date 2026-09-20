@@ -296,7 +296,8 @@
             <configuration>
               <publishingServerId>central</publishingServerId>
               <autoPublish>true</autoPublish>
-              <waitUntil>published</waitUntil>
+              <!-- 上传完成即结束构建，后续校验与发布由 Central 自动处理。 -->
+              <waitUntil>uploaded</waitUntil>
               <skipPublishing>${central.skipPublishing}</skipPublishing>
             </configuration>
           </plugin>

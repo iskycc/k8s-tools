@@ -36,7 +36,7 @@ flowchart LR
 
 ## Maven Central 与持续集成
 
-[Maven CI](.github/workflows/ci.yml) 在 `main` 提交和 PR 上使用 Java 8、21 构建并运行测试。[发布流水线](.github/workflows/publish.yml) 在正式 GitHub Release 发布后，将项目 jar、源码、Javadoc、POM 和 GPG 签名上传到 Maven Central，并等待发布完成。
+[Maven CI](.github/workflows/ci.yml) 在 `main` 提交和 PR 上使用 Java 8、21 构建并运行测试。[发布流水线](.github/workflows/publish.yml) 在正式 GitHub Release 发布后，将项目 jar、源码、Javadoc、POM 和 GPG 签名上传到 Central Portal，上传成功后结束；后续校验和正式发布由 Central 自动处理。Actions 成功不表示产物已可下载，最终状态见 Portal 的 Deployments。
 
 首次使用需要确认 Central Portal 中的 `io.github.iskycc` 命名空间已验证，并配置 Central Portal token 与 GPG 密钥。配置步骤、Secrets 名称、版本规则和本地验证命令见 [Maven Central 发布指南](docs/publishing.md)。
 
