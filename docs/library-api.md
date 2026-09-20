@@ -1,6 +1,6 @@
 # Java 工具库：资源增删查改
 
-本文对应当前开发版本 `1.1.0-SNAPSHOT`。已发布的 `1.0.0` 只有只读查询接口，不包含本文新增的 CRUD API。开发版可配置 [Central Portal 快照仓库](publishing.md#发布与使用快照)，或在本仓库运行 `mvn clean install` 后，以 `io.github.iskycc:k8s-tools:1.1.0-SNAPSHOT` 引用。
+本文适用于正式版 `io.github.iskycc:k8s-tools:1.1.0`，可直接从 Maven Central 引用，无需配置额外仓库。旧版 `1.0.0` 只有只读查询接口，不包含本文的 CRUD API。开发构建 `1.1.0-SNAPSHOT` 可通过 [Central Portal 快照仓库](publishing.md#发布与使用快照)获取，也可在本仓库运行 `mvn clean install` 安装到本地。
 
 ## 连接与公共入口
 

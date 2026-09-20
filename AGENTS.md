@@ -61,7 +61,7 @@ java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
 
 ## 通用资源 API 约定
 
-- 公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。当前新增接口位于 `1.1.0-SNAPSHOT`，不要描述为已在 `1.0.0` 发布。
+- 公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.1.0-SNAPSHOT`。
 - `ResourceDefinition` 明确 apiVersion、plural、Kind 和作用域；`K8sResources` 是常用常量，不是完整 API 清单。CRD 和其他资源用 Discovery 或显式定义，禁止推测 Kind 的复数。
 - 写入使用完整 Gson JSON，保留未知字段并复制输入；原有简化 POJO 只用于读取，不能拿它们做完整 PUT。PUT 要求 `metadata.resourceVersion`，冲突交由调用方合并。
 - 集群资源不能指定 namespace；命名空间资源的单对象读写和集合删除必须有具体 namespace。只有旧 list 快捷方法把字符串 `all` 解释为跨命名空间，新入口的 `all` 是真实命名空间。

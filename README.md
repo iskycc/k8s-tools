@@ -40,15 +40,15 @@ flowchart LR
 
 首次使用需要确认 Central Portal 中的 `io.github.iskycc` 命名空间已验证，并配置 Central Portal token 与 GPG 密钥。配置步骤、Secrets 名称、版本规则和本地验证命令见 [Maven Central 发布指南](docs/publishing.md)。
 
-**当前开发版为 `1.1.0-SNAPSHOT`，新增 CRUD API 尚未发布为正式版。** 快照使用方式见[快照仓库配置](docs/publishing.md#发布与使用快照)，也可运行 `mvn clean install` 安装到本地。完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。
+**`1.1.0` 正式版已发布，包含通用资源 CRUD API。** 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本仍为 `1.1.0-SNAPSHOT`，快照使用方式见[快照仓库配置](docs/publishing.md#发布与使用快照)。
 
-旧版 `1.0.0`（只读查询）已发布到 [Maven Central](https://repo.maven.apache.org/maven2/io/github/iskycc/k8s-tools/1.0.0/)，其他 Maven 项目可直接引用以下依赖，无需添加额外仓库：
+其他 Maven 项目可直接从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.1.0/) 引用以下依赖，无需添加额外仓库。旧版 `1.0.0` 只提供查询接口。
 
 ```xml
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
 </dependency>
 ```
 

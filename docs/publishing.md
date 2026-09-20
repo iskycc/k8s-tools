@@ -91,7 +91,7 @@ gpg --armor --export-secret-keys 'YOUR_KEY_FINGERPRINT' > /tmp/k8s-tools-release
 
 ## 发布一个版本
 
-`1.0.0` 已发布；当前开发分支为 `1.1.0-SNAPSHOT`，下面以准备下一版 `1.1.0` 为例。
+`1.1.0` 已发布到 [Maven Central 正式版仓库](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.1.0/)。当前源码 POM 仍为 `1.1.0-SNAPSHOT`，发布工作流仅修改临时检出目录的版本。下面保留 `1.1.0` 的流程作为示例；后续发布必须使用新的版本，不能重复发布 `1.1.0`。
 
 1. 将流水线、发布 POM 和许可证提交到仓库，确保目标代码通过 CI。
 2. 确定版本，例如 `1.1.0`。对应标签中的 `pom.xml` 版本必须是 `1.1.0` 或 `1.1.0-SNAPSHOT`。发布下一个版本前，先将开发版本更新为相应的 `X.Y.Z-SNAPSHOT`。

@@ -1,6 +1,6 @@
 # 工具库完整性核对
 
-核对对象是单模块 Java 库及 CLI，开发版本为 `1.1.0-SNAPSHOT`。`1.0.0` 已发布，本次新增接口尚未作为正式版本发布。
+核对对象是单模块 Java 库及 CLI，本次新增接口已随 `1.1.0` 正式版发布到 Maven Central。当前源码的开发构建版本为 `1.1.0-SNAPSHOT`。
 
 ## 本次补齐
 
@@ -63,4 +63,4 @@ mvn clean verify
 
 SSH 模拟器检查 Secret 清单在创建时包含 SA 注解，覆盖新建、复用、重建、AlreadyExists 和禁用重建；其验证范围仍是本地模拟。**没有在真实集群验证完整 Kubernetes schema、准入、RBAC、控制器或全部 API 版本**，测试 fixture 不是版本兼容认证。
 
-发布前还需在独立副本将版本设为正式值，生成 sources/Javadoc 并使用临时测试 keyring 验证签名。实际运行结果应以 `target/surefire-reports` 和发布流水线为准；不要使用已经发布的 `1.0.0` 坐标覆盖本次变更。
+后续发布前需在独立副本将版本设为正式值，生成 sources/Javadoc 并使用临时测试 keyring 验证签名。实际运行结果应以 `target/surefire-reports` 和发布流水线为准；已经发布的正式版本不可覆盖。
