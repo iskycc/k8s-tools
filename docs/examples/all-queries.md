@@ -85,3 +85,5 @@ Discovery 的 verbs 是 API 支持的动作，不是 RBAC 权限。示例跳过�
 Redis 使用 `<masterIP>ServiceToken`、`<masterIP>ApiServerUrl` 两个 String，以及配套的 `<masterIP>ServiceTokenMetadata`。再次运行主程序会复用缓存，`--refresh-cache` 先删除后重新获取，详见 [Redis 缓存指南](../redis-cache.md)。缓存不保证 token 永久有效；服务端 Secret 本身失效时需修复凭据，单纯删除 Redis 可能再次读到相同 token。
 
 本例使用 `fromSsh`，默认跳过 HTTPS 证书与主机名校验；SSH 主机密钥也沿用当前库的接受策略。需要严格 TLS 时，在客户端 Builder 的 `.fromSsh(ssh)` 前增加 `.insecureSkipTlsVerify(false).tlsAutoFallback(false)`，使用发现/缓存的 CA 或 JVM 信任库。完整配置见 [Redis 接入指南](../redis-cache.md)。
+
+该 main Demo 也由 [真实 Kubernetes E2E](../e2e.md) 工作流编译并运行；`queryTypedModels` 的对应接口另有实际资源与控制器状态断言。

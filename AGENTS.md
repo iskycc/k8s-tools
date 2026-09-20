@@ -9,6 +9,7 @@
 - `src/main/java/com/iskycc/k8s/ssh/` 负责 SSH 配置、命令执行、凭据获取和 Redis 缓存；`api/` 负责 HTTP/TLS、异常、Discovery、通用资源 CRUD 和分页；`api/model/` 放置 Gson 资源模型。
 - `src/test/java/com/iskycc/k8s/mock/` 提供模拟 SSH master、HTTPS API Server 和测试证书。模拟服务不运行真实 `kubectl`。
 - 依赖、插件和编译设置以 `pom.xml` 为准；新增 Jedis 按用户要求固定为 5.2.0；Commons Pool 与 JSON-java 直接声明以统一下游版本，单靠本库 dependencyManagement 不会传递版本约束。当前使用 Apache MINA SSHD 2.19.0、Apache HttpClient 5（Java 8 下的 PATCH 支持）、Gson、JUnit 4。排除 SSHD 引入但未使用的 jcl-over-slf4j；保留必需的 SLF4J API。SLF4J NOP 为 optional，不强制传递给库的使用者。JUnit、Hamcrest、Bouncy Castle 仅为测试依赖。
+- `.github/workflows/e2e.yml` 在独立 GitHub runner 创建 kind / Kubernetes 1.37.0、OpenSSH 和 Redis，Java 8、21 上执行 `real-e2e` profile 及查询 Demo；说明见 [docs/e2e.md](docs/e2e.md)。真实测试使用 `RealKubernetesIT`，默认 Surefire 和发布构建不执行；不要将真实集群测试改为普通 `*Test`。环境脚本仅用于一次性 GitHub Linux runner，凭据不得进入日志或上传附件。
 - `.github/workflows/ci.yml` 在 Java 8、21 上构建；`publish.yml` 使用 Java 21 签名并发布正式版到 Central Portal；`publish-snapshot.yml` 从 `main` 手动发布快照。发布操作说明见 [docs/publishing.md](docs/publishing.md)。
 
 ## 开发与构建

@@ -199,6 +199,30 @@
   </build>
 
   <profiles>
+    <!-- 仅显式启用时连接一次性真实集群；普通 test/发布构建仍只运行本地模拟测试。 -->
+    <profile>
+      <id>real-e2e</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <version>3.2.5</version>
+            <configuration>
+              <includes><include>**/RealKubernetesIT.java</include></includes>
+              <systemPropertyVariables>
+                <k8s.tools.realE2e>true</k8s.tools.realE2e>
+              </systemPropertyVariables>
+            </configuration>
+            <executions>
+              <execution>
+                <goals><goal>integration-test</goal><goal>verify</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
     <!-- 快照使用标准 Maven 仓库协议；只有显式激活才允许上传。 -->
     <profile>
       <id>snapshot</id>

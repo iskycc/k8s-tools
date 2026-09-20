@@ -14,6 +14,8 @@
 3. [Redis 凭据缓存与自动接入](docs/redis-cache.md)：缓存 token/API 地址、删除刷新、免手工配置 API 与证书；缓存从 `1.3.0` 起提供，客户端托管入口从 `1.5.0` 起提供。
 4. [Java API 使用指南](docs/library-api.md)：连接、CRUD、Deployment/Service、分页、CRD、子资源和错误处理。
 
+真实集群验证见 [GitHub Actions E2E](docs/e2e.md)：使用临时 kind Kubernetes、OpenSSH 和 Redis，在 Java 8、21 上验证接入、查询、CRUD、分页、CRD、RBAC 和 TLS。
+
 ## 项目结构与调用链
 
 ```mermaid
@@ -368,6 +370,7 @@ mvn -Dtest=MainDemoTest test
 | `K8sResourceClientTest` | HTTP CRUD、完整 JSON、三种 Patch、Apply、分页、CRD Discovery、删除选项、子资源、冲突/权限/网络错误及写入不重放 |
 | `K8sToolsE2ETest` | 新建与复用 Secret、SA 重建及禁用重建、token 轮询、地址发现回退、资源查询、TLS 降级与严格模式、SSH 认证失败、HTTP 401/404 |
 | `MainDemoTest` | CLI 对模拟集群执行完整流程，校验输出且不泄露完整 token |
+| `RealKubernetesIT`（显式 profile） | [真实 kind E2E](docs/e2e.md)：SSH/Redis、CRUD、控制器、分页、CRD、TLS/RBAC；报告位于 `target/failsafe-reports/` |
 
 测试报告位于 `target/surefire-reports/`。模拟服务验证本地 SSH/HTTPS 链路及预设响应，不执行真正的 `kubectl`，也不验证真实 RBAC、准入校验或完整 token 生命周期。fixture 中的 `v1.28.2` 是固定返回值，不代表已通过该 Kubernetes 版本的集成验证。
 
