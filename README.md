@@ -36,9 +36,52 @@ flowchart LR
 | [pom.xml](pom.xml) | 单模块 Maven 构建、依赖与插件配置 |
 | [AGENTS.md](AGENTS.md) | 仓库维护和编码协作指南 |
 
-主要依赖为 Apache MINA SSHD（SSH）、Apache HttpClient 5（HTTP/PATCH）和 Gson（JSON）；CLI 使用 SLF4J NOP，NOP 声明为 optional，不强制传递给库的使用者。JUnit 4、Bouncy Castle 仅用于测试。版本以 `pom.xml` 为准。
-
 项目采用 [Apache License 2.0](LICENSE)。
+
+### 与 Kubernetes 官方 Java SDK 的关系
+
+本项目没有依赖官方 `io.kubernetes:client-java` 或 `client-java-api`。当前 `K8sApiClient` 使用 Apache HttpClient 发出 Bearer Token REST 请求，Gson 负责 JSON，Discovery 提供资源路径与操作能力；SSH 凭据初始化由 Apache MINA SSHD 完成。
+
+因此，本库的公共接口、资源模型和错误处理由本项目维护。官方 SDK 的客户端配置、生成模型、watch、exec 等功能不会因依赖本库而自动提供。官方客户端从 `20.0.0` 起在主版本中移除了 Java 8 支持，另提供 `-legacy` 版本；详见 [Kubernetes Java Client 官方说明](https://github.com/kubernetes-client/java#release)。本库继续使用现有 REST 实现，保持 Java 8 兼容。
+
+## 开源组件与依赖范围
+
+下表对应 `1.2.1` 的依赖配置及当前源码的 [pom.xml](pom.xml)。**`1.2.1` 将 SSHD 升级为 `2.19.0`；已有的 `1.2.0` 仍使用 `2.12.1`。** 源码开发构建版本为 `1.2.1-SNAPSHOT`，正式发布由工作流转换为 `1.2.1`。
+
+运行和测试依赖按 **2026-09-20** 的 Maven Central 版本元数据及上游 Java 要求核对，选用支持 Java 8 的最新稳定版，不选择 alpha、beta、RC、milestone 或 SNAPSHOT。依据和版本选择见[依赖版本核对](docs/dependency-versions.md)。依赖固定为具体版本，后续升级需重新核对并运行 Java 8 测试。
+
+| 开源组件 / Maven 坐标 | 版本 | 用途 | 范围与传递行为 | 许可证 |
+| --- | --- | --- | --- | --- |
+| [Apache MINA SSHD](https://mina.apache.org/sshd-project/)：`org.apache.sshd:sshd-core` | `2.19.0` | SSH 客户端、密码/私钥认证、远程执行命令 | 直接 `compile` 依赖，传递给使用方 | Apache-2.0 |
+| Apache MINA SSHD：`org.apache.sshd:sshd-common` | `2.19.0` | SSH 协议、密钥解析等公共能力 | 由 sshd-core 传递 | Apache-2.0 |
+| [Apache HttpClient](https://hc.apache.org/httpcomponents-client-5.6.x/)：`org.apache.httpcomponents.client5:httpclient5` | `5.6.4` | Kubernetes HTTP/TLS 请求及 PATCH | 直接 `compile` 依赖，传递给使用方 | Apache-2.0 |
+| [Apache HttpCore](https://hc.apache.org/httpcomponents-core-5.4.x/)：`org.apache.httpcomponents.core5:httpcore5`、`httpcore5-h2` | `5.4.3` | HttpClient 所需的 HTTP 协议与连接基础设施 | 由 httpclient5 传递 | Apache-2.0 |
+| [Gson](https://github.com/google/gson)：`com.google.code.gson:gson` | `2.14.0` | Kubernetes JSON 编解码和公共 JSON API | 直接 `compile` 依赖，传递给使用方 | Apache-2.0 |
+| [SLF4J](https://www.slf4j.org/license.html)：`org.slf4j:slf4j-api` | `2.0.19` | SSHD、HttpClient 的日志接口 | 直接 `compile` 依赖，统一上游日志 API 版本；不选择日志实现 | MIT |
+| SLF4J：`org.slf4j:slf4j-nop` | `2.0.19` | 本仓库 CLI 的静默日志实现 | `runtime` + `optional=true`，不会传递给使用方 | MIT |
+
+`jcl-over-slf4j` 是 SSHD 上游 POM 引入的 Commons Logging 桥接。本库及当前 SSHD 实现不使用 Commons Logging，已通过 POM `exclusions` 排除它，避免向业务项目注入无关桥接。保留 SSHD、HttpClient 的必要依赖，不通过批量排除破坏运行能力。使用方已有日志实现时直接沿用，不需要添加本库的 NOP 实现。
+
+Gson 引入的 `error_prone_annotations` 仅供静态分析使用，不是 JSON 运行时所需，已排除其传递；需要 Error Prone 的业务项目可按自己的编译工具配置引入。SLF4J 已升级到 `2.0.19`，使用方的日志 provider 需兼容 SLF4J 2.x；旧的 1.7 binding 不能直接作为 2.x provider 使用，参见 [SLF4J 版本兼容说明](https://www.slf4j.org/faq.html#compatibility)。
+
+以下组件仅用于本仓库的测试，均以 `test` 范围解析，不会传递给引用 k8s-tools 的项目：
+
+| 开源组件 / Maven 坐标 | 版本 | 测试用途 | 许可证 |
+| --- | --- | --- | --- |
+| [JUnit 4](https://junit.org/junit4/)：`junit:junit` | `4.13.2` | 单元测试、SSH/HTTPS 模拟端到端测试 | EPL-1.0 |
+| [Hamcrest](https://hamcrest.org/JavaHamcrest/)：`org.hamcrest:hamcrest` | `3.0` | JUnit 匹配器；排除旧 hamcrest-core 1.3 后直接声明为 test | BSD-3-Clause |
+| [Bouncy Castle](https://www.bouncycastle.org/licence.html)：`org.bouncycastle:bcpkix-jdk18on`、`bcprov-jdk18on`、`bcutil-jdk18on` | `1.86` | 生成模拟 API Server 的证书与 CA；后两项由 bcpkix 传递 | Bouncy Castle Licence（MIT） |
+
+Maven 编译、测试、打包、源码/Javadoc、GPG 和 Central 发布插件属于构建工具，版本与启用条件见 POM 的 `build` / `profiles`，不属于业务依赖，不会随本库进入使用方 classpath。许可证以各组件发行包中的声明为准。
+
+### 发布产物包含什么
+
+- 主 jar 只包含 `src/main` 的生产类、资源及 Maven 元数据，保留 Java API 和 CLI。不包含 `src/test`、模拟服务、测试证书、文档示例或测试报告，也不内嵌第三方 jar。
+- `-sources.jar` 和 `-javadoc.jar` 仅提供生产源码及其文档；不发布测试源码、测试 Javadoc 或 `-tests.jar`。
+- `target/test-classes`、`target/surefire-reports` 和 CLI 使用的 `target/dependency` 都是本地构建目录，不是发布附件。`dependency:copy-dependencies -DincludeScope=runtime` 不复制测试依赖。
+- 发布的 POM 中保留 `test` 和 `optional` 声明，用于说明项目自身构建；这些声明不会变成使用方的传递依赖。可见声明不等于把测试代码打入 jar，规则见 [Maven 依赖范围说明](https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html#dependency-scope)。
+
+在使用方项目执行 `mvn dependency:tree -Dscope=runtime`，默认应只看到 k8s-tools 及上述必要组件，不应由本库引入 JUnit、Hamcrest、Bouncy Castle、SLF4J NOP、Error Prone 注解或 Commons Logging 桥接。使用方自行声明的依赖及版本管理会影响最终结果。
 
 ## Maven Central 与持续集成
 
@@ -46,15 +89,15 @@ flowchart LR
 
 仅仓库维护者发布版本时需要验证 Central Portal 命名空间并配置发布 token 与 GPG 密钥。使用公开依赖无需这些凭据；接入步骤见 [Maven 配置指南](docs/maven-usage.md)，发布操作见 [Maven Central 发布指南](docs/publishing.md)。
 
-**`1.2.0` 新增仅密码 SSH 登录模式，保留 `1.1.0` 的通用资源 CRUD API。** 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.2.0-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
+**`1.2.1` 更新 Java 8 兼容依赖并精简传递依赖，保留 `1.2.0` 的仅密码 SSH 模式及 `1.1.0` 的通用资源 CRUD API。** 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.2.1-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
 
-其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.2.0/) 下载。旧版 `1.0.0` 只提供查询接口。
+其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.2.1/) 下载。旧版 `1.0.0` 只提供查询接口。
 
 ```xml
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.2.0</version>
+  <version>1.2.1</version>
 </dependency>
 ```
 
@@ -70,15 +113,15 @@ flowchart LR
 # 编译并运行全部单元测试和模拟端到端测试
 mvn test
 
-# 构建应用 jar（包含测试），同时复制运行时依赖
+# 运行测试后构建应用 jar（不打包测试代码），同时复制运行时依赖
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 检查命令行入口，不连接集群
-java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
-产物为 `target/k8s-tools-1.2.0-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
+产物为 `target/k8s-tools-1.2.1-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
 
 ## 命令行使用
 
@@ -92,7 +135,7 @@ java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
 ### 运行示例
 
 ```bash
-java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --user root --key "$HOME/.ssh/id_rsa" \
   --namespace default
@@ -103,7 +146,7 @@ java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
 只使用密码登录机器、忽略本地 SSH 私钥及用户密钥签名认证：
 
 ```bash
-java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --port 22 --user root \
   --password '<SSH密码>' --password-only \

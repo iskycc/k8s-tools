@@ -1,6 +1,6 @@
 # Java 工具库：资源增删查改
 
-本文使用正式版坐标 `io.github.iskycc:k8s-tools:1.2.0`，发布完成后可从 Maven Central 引用，无需配置额外仓库。通用资源 CRUD 从 `1.1.0` 起提供，仅密码 SSH 模式从 `1.2.0` 起提供；旧版 `1.0.0` 只有查询接口。当前开发构建为 `1.2.0-SNAPSHOT`，可在本仓库运行 `mvn clean install` 安装到本地；本次不发布新快照，远端快照使用规则见[发布指南](publishing.md#发布与使用快照)。
+本文使用正式版坐标 `io.github.iskycc:k8s-tools:1.2.1`，发布完成后可从 Maven Central 引用，无需配置额外仓库。通用资源 CRUD 从 `1.1.0` 起提供，仅密码 SSH 模式从 `1.2.0` 起提供；旧版 `1.0.0` 只有查询接口。当前开发构建为 `1.2.1-SNAPSHOT`，可在本仓库运行 `mvn clean install` 安装到本地；本次不发布新快照，远端快照使用规则见[发布指南](publishing.md#发布与使用快照)。
 
 首次接入先阅读 [Maven 坐标与接入配置](maven-usage.md)，其中提供完整 POM 和可编译运行的[查询示例](examples/K8sReadExample.java)。本文的 Java 代码块是按场景选择的调用片段，放入业务方法中使用；后续片段复用连接示例中的 `client` 和 `configMaps`。创建、删除等示例会修改目标集群，不应把全文作为一个脚本顺序执行。
 
@@ -98,7 +98,7 @@ K8sApiClient strictSshClient = K8sApiClient.builder()
 
 ### 仅使用密码登录 SSH 机器
 
-**本节的 `passwordOnly(true)` 和密码隔离行为从 `1.2.0` 起提供。** `1.1.0` 及之前的远端快照不包含这些改动；使用方应引用 `1.2.0`，或从当前源码执行 `mvn clean install` 后引用本地 `1.2.0-SNAPSHOT`。
+**本节的 `passwordOnly(true)` 和密码隔离行为从 `1.2.0` 起提供。** `1.1.0` 及之前的远端快照不包含这些改动；使用方应引用 `1.2.1`，或从当前源码执行 `mvn clean install` 后引用本地 `1.2.1-SNAPSHOT`。
 
 ```java
 com.iskycc.k8s.ssh.SshConfig passwordSshConfig = com.iskycc.k8s.ssh.SshConfig.builder()

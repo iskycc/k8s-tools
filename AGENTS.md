@@ -8,7 +8,7 @@
 - 主链路：`Main` → `ServiceTokenFetcher` → `SshExecutor` 执行远端 `kubectl` → `MasterInfo` → `K8sApiClient` 发起 Bearer Token REST 请求；已有 API 凭据可直接构造客户端。
 - `src/main/java/com/iskycc/k8s/ssh/` 负责 SSH 配置、命令执行和凭据获取；`api/` 负责 HTTP/TLS、异常、Discovery、通用资源 CRUD 和分页；`api/model/` 放置 Gson 资源模型。
 - `src/test/java/com/iskycc/k8s/mock/` 提供模拟 SSH master、HTTPS API Server 和测试证书。模拟服务不运行真实 `kubectl`。
-- 依赖、插件和编译设置以 `pom.xml` 为准；当前使用 Apache MINA SSHD、Apache HttpClient 5（Java 8 下的 PATCH 支持）、Gson、JUnit 4。SLF4J NOP 为 optional，不强制传递给库的使用者。Bouncy Castle 仅为测试依赖。
+- 依赖、插件和编译设置以 `pom.xml` 为准；当前使用 Apache MINA SSHD 2.19.0、Apache HttpClient 5（Java 8 下的 PATCH 支持）、Gson、JUnit 4。排除 SSHD 引入但未使用的 jcl-over-slf4j；保留必需的 SLF4J API。SLF4J NOP 为 optional，不强制传递给库的使用者。JUnit、Hamcrest、Bouncy Castle 仅为测试依赖。
 - `.github/workflows/ci.yml` 在 Java 8、21 上构建；`publish.yml` 使用 Java 21 签名并发布正式版到 Central Portal；`publish-snapshot.yml` 从 `main` 手动发布快照。发布操作说明见 [docs/publishing.md](docs/publishing.md)。
 
 ## 开发与构建
@@ -28,7 +28,7 @@ mvn -Dtest=MainDemoTest test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 无集群的 CLI 启动检查
-java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
@@ -62,7 +62,7 @@ java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
 
 ## 通用资源 API 约定
 
-- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，可运行的查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.2.0-SNAPSHOT`。
+- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，可运行的查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.2.1-SNAPSHOT`。
 - `ResourceDefinition` 明确 apiVersion、plural、Kind 和作用域；`K8sResources` 是常用常量，不是完整 API 清单。CRD 和其他资源用 Discovery 或显式定义，禁止推测 Kind 的复数。
 - 写入使用完整 Gson JSON，保留未知字段并复制输入；原有简化 POJO 只用于读取，不能拿它们做完整 PUT。PUT 要求 `metadata.resourceVersion`，冲突交由调用方合并。
 - 集群资源不能指定 namespace；命名空间资源的单对象读写和集合删除必须有具体 namespace。只有旧 list 快捷方法把字符串 `all` 解释为跨命名空间，新入口的 `all` 是真实命名空间。
@@ -81,6 +81,8 @@ java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
 - TLS、认证、异常处理变更：验证对应的成功与失败行为，包括严格模式和自动降级；CLI 参数或输出变更同步核对 `MainDemoTest` 与 `Main.usage()`。
 - 按改动范围先运行相关测试。Java 代码、依赖或构建配置变更交付前运行 `mvn test`；若已运行成功的 `mvn package`，其中的测试无需重复执行。纯文档改动核对命令、链接和实际默认值即可，无需新增测试。
 - 查看 `target/surefire-reports/` 确认结果。说明实际运行了哪些检查；未执行、被环境阻断或仅由 mock 覆盖的部分如实列出。
+- 依赖或打包配置变更：检查主 jar、sources、Javadoc 中没有测试类、mock、测试资源或内嵌依赖；不发布 tests 附件。用只引用本库的独立 Maven 项目核对实际传递依赖，并在不带测试依赖的 classpath 下验证必要运行功能；不能仅凭本仓库的测试 classpath 判断使用方依赖完整性。
+- 运行与测试依赖选择支持 Java 8 的最新稳定版本；核对 Central 元数据和上游最低 JDK，不将 alpha/beta/RC/milestone 当作正式版。记录日期和选择依据于 `docs/dependency-versions.md`，扫描实际依赖 jar 的基础字节码并在真实 JDK 8 上验证。JUnit 保留 4.x API，Hamcrest 单独使用最新兼容版本；Gson 静态分析注解不向下游传递，SLF4J API 与 optional NOP 版本保持一致。
 
 ## 文档与交付
 
