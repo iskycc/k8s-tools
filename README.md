@@ -38,7 +38,7 @@ flowchart LR
 
 首次使用需要确认 Central Portal 中的 `io.github.iskycc` 命名空间已验证，并配置 Central Portal token 与 GPG 密钥。配置步骤、Secrets 名称、版本规则和本地验证命令见 [Maven Central 发布指南](docs/publishing.md)。
 
-例如成功发布 `v1.0.0` 后，其他 Maven 项目可直接引用以下依赖，无需添加额外仓库。此示例不表示该版本已经发布：
+`1.0.0` 已发布到 [Maven Central](https://repo.maven.apache.org/maven2/io/github/iskycc/k8s-tools/1.0.0/)，其他 Maven 项目可直接引用以下依赖，无需添加额外仓库：
 
 ```xml
 <dependency>
