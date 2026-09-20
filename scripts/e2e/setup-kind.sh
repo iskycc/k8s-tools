@@ -41,7 +41,8 @@ sudo install -m 600 -o k8se2e -g k8se2e "$KUBECONFIG" /home/k8se2e/.kube/config
 kubectl config view --raw --minify -o 'jsonpath={.clusters[0].cluster.certificate-authority-data}' \
   | base64 --decode > "$state_dir/ca.crt"
 sudo install -m 600 -o k8se2e -g k8se2e "$state_dir/ca.crt" /home/k8se2e/.kube/ca.crt
-ssh-keygen -q -t ed25519 -N '' -f "$state_dir/ssh_host_key"
+# RSA 主机密钥也可由不携带测试加密 provider 的 Java 8 CLI 校验。
+ssh-keygen -q -t rsa -b 3072 -N '' -f "$state_dir/ssh_host_key"
 cat > "$state_dir/sshd_config" <<CONFIG
 ListenAddress 127.0.0.1
 Port 22222
