@@ -163,7 +163,8 @@ public class RealKubernetesIT {
         assertEquals("two", kubectl("-n", namespace, "get", "configmap", "settings", "-o", "jsonpath={.data.value}"));
         stale.getAsJsonObject("data").addProperty("value", "stale");
         assertEquals(409, assertThrows(K8sApiException.class, () -> maps.replace("settings", stale)).getStatusCode());
-        assertEquals(409, assertThrows(K8sApiException.class, () -> maps.create(stale)).getStatusCode());
+        assertEquals(409, assertThrows(K8sApiException.class, () -> maps.create(
+                json("{\"metadata\":{\"name\":\"settings\"}}"))).getStatusCode());
         maps.patch("settings", PatchType.MERGE_PATCH, json("{\"data\":{\"extra\":\"merged\"}}"));
         maps.patch("settings", PatchType.JSON_PATCH, JsonParser.parseString(
                 "[{\"op\":\"replace\",\"path\":\"/data/value\",\"value\":\"patched\"}]"));
