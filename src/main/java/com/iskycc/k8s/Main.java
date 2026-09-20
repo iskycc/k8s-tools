@@ -29,6 +29,7 @@ public final class Main {
         String user = "root";
         String password = null;
         String keyPath = null;
+        boolean passwordOnly = false;
         String namespace = "default";
         String apiServerOverride = null;
         boolean insecure = false;
@@ -47,6 +48,9 @@ public final class Main {
                     break;
                 case "--password":
                     password = next(args, ++i, a);
+                    break;
+                case "--password-only":
+                    passwordOnly = true;
                     break;
                 case "--key":
                     keyPath = next(args, ++i, a);
@@ -75,11 +79,18 @@ public final class Main {
             usage();
             System.exit(2);
         }
+        if (passwordOnly && (password == null || password.isEmpty())) {
+            System.err.println("--password-only 必须同时提供非空 --password");
+            System.exit(2);
+            return;
+        }
 
         try {
             SshConfig.Builder sshBuilder = SshConfig.builder()
                     .host(host).port(port).username(user);
-            if (keyPath != null) {
+            if (passwordOnly) {
+                sshBuilder.password(password).passwordOnly(true);
+            } else if (keyPath != null) {
                 sshBuilder.privateKeyPath(keyPath);
             } else if (password != null) {
                 sshBuilder.password(password);
@@ -162,8 +173,9 @@ public final class Main {
         System.out.println("用法: java -cp 'k8s-tools.jar:dependency/*' com.iskycc.k8s.Main --host <master-ip> [选项]");
         System.out.println("  --port <n>          SSH 端口, 默认 22");
         System.out.println("  --user <u>          SSH 用户, 默认 root");
-        System.out.println("  --password <p>      SSH 密码");
-        System.out.println("  --key <path>        SSH 私钥路径(与 --password 二选一)");
+        System.out.println("  --password <p>      SSH 密码(未传 --key 时仅用密码认证)");
+        System.out.println("  --password-only     仅用密码，忽略 --key、本地私钥及 SSH agent；需 --password");
+        System.out.println("  --key <path>        SSH 私钥路径(同时传密码时优先，--password-only 除外)");
         System.out.println("  --namespace <ns>    查询的命名空间, 默认 default");
         System.out.println("  --api-server <url>  覆盖自动发现的 API Server 地址");
         System.out.println("  --insecure          直接跳过 TLS 证书校验(默认: CA 校验失败时自动忽略自签名)");

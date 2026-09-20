@@ -46,15 +46,15 @@ flowchart LR
 
 仅仓库维护者发布版本时需要验证 Central Portal 命名空间并配置发布 token 与 GPG 密钥。使用公开依赖无需这些凭据；接入步骤见 [Maven 配置指南](docs/maven-usage.md)，发布操作见 [Maven Central 发布指南](docs/publishing.md)。
 
-**`1.1.0` 正式版已发布，包含通用资源 CRUD API。** 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本仍为 `1.1.0-SNAPSHOT`，快照使用方式见[快照仓库配置](docs/publishing.md#发布与使用快照)。
+**`1.2.0` 新增仅密码 SSH 登录模式，保留 `1.1.0` 的通用资源 CRUD API。** 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.2.0-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
 
-其他 Maven 项目可直接从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.1.0/) 引用以下依赖，无需添加额外仓库。旧版 `1.0.0` 只提供查询接口。
+其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.2.0/) 下载。旧版 `1.0.0` 只提供查询接口。
 
 ```xml
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.1.0</version>
+  <version>1.2.0</version>
 </dependency>
 ```
 
@@ -74,11 +74,11 @@ mvn test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 检查命令行入口，不连接集群
-java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
-产物为 `target/k8s-tools-1.1.0-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
+产物为 `target/k8s-tools-1.2.0-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
 
 ## 命令行使用
 
@@ -92,7 +92,7 @@ java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
 ### 运行示例
 
 ```bash
-java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --user root --key "$HOME/.ssh/id_rsa" \
   --namespace default
@@ -100,13 +100,26 @@ java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
 
 示例地址需替换为实际 master 地址。密码认证时，将 `--key "$HOME/.ssh/id_rsa"` 替换为 `--password '<SSH密码>'`。程序依次输出集群版本、节点、命名空间，以及所选命名空间下的 Pod、Service、Deployment 摘要。
 
+只使用密码登录机器、忽略本地 SSH 私钥及用户密钥签名认证：
+
+```bash
+java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
+  com.iskycc.k8s.Main \
+  --host 192.0.2.10 --port 22 --user root \
+  --password '<SSH密码>' --password-only \
+  --namespace default
+```
+
+**版本说明：`--password-only` 及密码认证隔离行为从 `1.2.0` 起提供，`1.1.0` 不包含这些改动。** 仅提供 `--password` 时会自动进入密码模式；显式使用 `--password-only` 还会忽略同时传入的 `--key`。
+
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
 | `--host <host>` | 必填 | SSH 主机地址 |
 | `--port <n>` | `22` | SSH 端口 |
 | `--user <user>` | `root` | SSH 用户 |
-| `--password <password>` | 无 | SSH 密码，与 `--key` 二选一 |
-| `--key <path>` | 无 | 本地私钥路径；同时提供密码时，CLI 优先使用私钥 |
+| `--password <password>` | 无 | SSH 密码；未传 `--key` 时仅用密码认证 |
+| `--password-only` | 未显式开启 | 强制仅用密码，忽略 `--key` 和本地密钥来源；必须提供非空 `--password` |
+| `--key <path>` | 无 | 本地私钥路径；同时提供密码时，CLI 优先使用私钥，除非指定 `--password-only` |
 | `--namespace <ns>` | `default` | Pod、Service、Deployment 的查询范围；`all` 表示所有命名空间 |
 | `--api-server <url>` | 自动发现 | 覆盖 API Server 地址，例如 `https://192.0.2.10:6443` |
 | `--insecure` | 未显式开启 | 直接跳过证书和主机名校验；未传此项时仍默认允许 TLS 自动降级 |
@@ -215,7 +228,11 @@ CA 读取失败时返回的 `MasterInfo.caCertPem` 为 `null`，不会终止凭�
 
 ### SSH 与 TLS
 
-`SshConfig.Builder` 支持 `host`、`port`（默认 `22`）、`username`（默认 `root`）、`password`、`privateKeyPath`、`privateKeyPassphrase` 和 `connectTimeoutMs`（默认 `15000`）。SSH 当前接受任意主机密钥，没有实现 `known_hosts` 校验配置。CLI 密码以命令行参数传入，会受 shell 历史与进程参数可见性影响。
+`SshConfig.Builder` 支持 `host`、`port`（默认 `22`）、`username`（默认 `root`）、`password`、`privateKeyPath`、`privateKeyPassphrase`、`passwordOnly` 和 `connectTimeoutMs`（默认 `15000`）。SSH 当前接受任意主机密钥，没有实现 `known_hosts` 校验配置。CLI 密码以命令行参数传入，会受 shell 历史与进程参数可见性影响。
+
+从 `1.2.0` 起，仅配置密码会自动进入密码模式；`passwordOnly(true)` 可强制忽略显式私钥路径及私钥口令。该模式不读取 `~/.ssh/config` 或默认身份文件、不使用 SSH agent、不进行用户公钥签名认证；`host`、`port`、`username` 必须通过 Builder 提供，不能依赖本地 SSH 别名或跳板配置。支持 `password` 和单密码 `keyboard-interactive`，不处理 OTP 等多因素交互。服务器若要求必须提供公钥或组合认证，则登录失败，错误密码也不会回退到密钥。Java 示例见[密码机器接入](docs/library-api.md#仅使用密码登录-ssh-机器)。
+
+SSH 传输层仍需要服务器主机密钥和握手签名。这里忽略的是本地用户私钥认证，与 HTTPS 的 TLS 校验和 Maven 发布的 GPG 签名分别配置。
 
 HTTPS 的实际校验方式取决于客户端构造方式：
 
@@ -245,7 +262,7 @@ API 连接超时默认为 `10000` 毫秒，读取超时为 `30000` 毫秒，可�
 
 ## 真实集群接入限制
 
-`1.1.0-SNAPSHOT` 已修正旧版 `1.0.0` 的 token Secret 创建顺序：创建请求中即包含 SA 注解，模拟器也增加了对应校验。真实集群仍需启用相关 token controller，并允许 SSH 用户创建 SA、Secret 和权限绑定；本项目的模拟测试不代表已经验证真实集群的 RBAC、准入策略或全部 Kubernetes 版本。
+从 `1.1.0` 起已修正旧版 `1.0.0` 的 token Secret 创建顺序：创建请求中即包含 SA 注解，模拟器也增加了对应校验。真实集群仍需启用相关 token controller，并允许 SSH 用户创建 SA、Secret 和权限绑定；本项目的模拟测试不代表已经验证真实集群的 RBAC、准入策略或全部 Kubernetes 版本。
 
 也可按 [Kubernetes 官方长期 token 创建方式](https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#manually-create-a-long-lived-api-token-for-a-serviceaccount)，由管理员预先准备专用 SA 和带注解的 Secret。以下清单对应默认名称：
 

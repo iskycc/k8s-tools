@@ -1,6 +1,6 @@
 # Java 工具库：资源增删查改
 
-本文适用于正式版 `io.github.iskycc:k8s-tools:1.1.0`，可直接从 Maven Central 引用，无需配置额外仓库。旧版 `1.0.0` 只有只读查询接口，不包含本文的 CRUD API。开发构建 `1.1.0-SNAPSHOT` 可通过 [Central Portal 快照仓库](publishing.md#发布与使用快照)获取，也可在本仓库运行 `mvn clean install` 安装到本地。
+本文使用正式版坐标 `io.github.iskycc:k8s-tools:1.2.0`，发布完成后可从 Maven Central 引用，无需配置额外仓库。通用资源 CRUD 从 `1.1.0` 起提供，仅密码 SSH 模式从 `1.2.0` 起提供；旧版 `1.0.0` 只有查询接口。当前开发构建为 `1.2.0-SNAPSHOT`，可在本仓库运行 `mvn clean install` 安装到本地；本次不发布新快照，远端快照使用规则见[发布指南](publishing.md#发布与使用快照)。
 
 首次接入先阅读 [Maven 坐标与接入配置](maven-usage.md)，其中提供完整 POM 和可编译运行的[查询示例](examples/K8sReadExample.java)。本文的 Java 代码块是按场景选择的调用片段，放入业务方法中使用；后续片段复用连接示例中的 `client` 和 `configMaps`。创建、删除等示例会修改目标集群，不应把全文作为一个脚本顺序执行。
 
@@ -95,6 +95,39 @@ K8sApiClient strictSshClient = K8sApiClient.builder()
 ```
 
 私钥有口令时用 `privateKeyPassphrase(...)`；密码认证使用 `password(...)`，示例中的值应从应用配置中提供。`fetch()` 在成功或失败后都会关闭 SSH。SSH 主机密钥校验和默认副作用见 [README](../README.md#默认行为与配置)。`fromMasterInfo(info, false)` 只控制缺 CA 时的初始模式，不会关闭 TLS 自动降级。
+
+### 仅使用密码登录 SSH 机器
+
+**本节的 `passwordOnly(true)` 和密码隔离行为从 `1.2.0` 起提供。** `1.1.0` 及之前的远端快照不包含这些改动；使用方应引用 `1.2.0`，或从当前源码执行 `mvn clean install` 后引用本地 `1.2.0-SNAPSHOT`。
+
+```java
+com.iskycc.k8s.ssh.SshConfig passwordSshConfig = com.iskycc.k8s.ssh.SshConfig.builder()
+        .host("192.0.2.10")
+        .port(22)
+        .username("root")
+        .password("<从应用配置取得的 SSH 密码>")
+        .passwordOnly(true)
+        .connectTimeoutMs(15000)
+        .build();
+
+com.iskycc.k8s.ssh.MasterInfo passwordMasterInfo =
+        new com.iskycc.k8s.ssh.ServiceTokenFetcher(passwordSshConfig,
+                new com.iskycc.k8s.ssh.ServiceTokenFetcher.Options()
+                        .recreateSaWhenTokenUnobtainable(false)
+                        .apiServerOverride("https://192.0.2.10:6443"))
+                .fetch();
+```
+
+将 `passwordMasterInfo` 按上一节的 CA 检查与 Builder 配置构造成严格 TLS 的 API 客户端。`fetch()` 仍可能创建 SA、Secret 和 cluster-admin 绑定；只执行普通 SSH 命令时可直接在 try-with-resources 中使用 `SshExecutor`。
+
+| 配置 | 认证行为 |
+| --- | --- |
+| 只设置 `password`，无私钥路径 | 自动使用密码模式 |
+| `passwordOnly(true)` + 非空密码 | 强制密码模式，忽略同时设置的 `privateKeyPath`、`privateKeyPassphrase` |
+| 只设置 `privateKeyPath` | 保留私钥认证 |
+| 同时设置密码与私钥，未强制密码模式 | 保留先尝试密钥的原有行为 |
+
+`isPasswordOnly()` 返回实际是否使用密码模式。该模式不读取本地 `~/.ssh/config` 和默认私钥、不使用 SSH agent，也不会回退到用户公钥签名认证；需要明确指定真实地址、端口和用户名，不能使用仅存在于本地 SSH 配置中的别名。支持 password 和单密码 keyboard-interactive，不支持 OTP 等多因素交互。密码必须非空；空格可能是密码的一部分，不会被 trim。SSH 握手仍使用服务器主机密钥签名；此配置不修改 HTTPS TLS 或 Maven GPG 签名行为。
 
 ## 查询与资源入口选择
 

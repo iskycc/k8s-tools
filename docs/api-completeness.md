@@ -1,6 +1,10 @@
 # 工具库完整性核对
 
-核对对象是单模块 Java 库及 CLI，本次新增接口已随 `1.1.0` 正式版发布到 Maven Central。当前源码的开发构建版本为 `1.1.0-SNAPSHOT`。
+核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.2.0-SNAPSHOT`。
+
+## 1.2.0 SSH 认证补齐
+
+仅配置密码时自动禁用用户密钥认证，`passwordOnly(true)` / `--password-only` 可强制忽略显式私钥、本地 SSH 配置、默认身份文件和 SSH agent。支持 password 与单密码 keyboard-interactive；混合凭据未强制时保留原有密钥优先行为。`SshExecutorTest` 使用 loopback SSH 和独立 home，验证默认私钥确实可用但密码模式不使用它、错误密码不回退、显式私钥仍可登录；CLI 测试覆盖强制模式与缺失密码检查。
 
 ## 本次补齐
 

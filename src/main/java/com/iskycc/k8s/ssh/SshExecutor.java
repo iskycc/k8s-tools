@@ -2,11 +2,16 @@ package com.iskycc.k8s.ssh;
 
 import com.iskycc.k8s.K8sToolsException;
 import org.apache.sshd.client.SshClient;
+import org.apache.sshd.client.auth.UserAuthFactory;
+import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory;
+import org.apache.sshd.client.auth.password.UserAuthPasswordFactory;
 import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.channel.ClientChannelEvent;
+import org.apache.sshd.client.config.hosts.HostConfigEntryResolver;
 import org.apache.sshd.client.session.ClientSession;
 import org.apache.sshd.common.NamedResource;
 import org.apache.sshd.common.config.keys.FilePasswordProvider;
+import org.apache.sshd.common.keyprovider.KeyIdentityProvider;
 import org.apache.sshd.common.util.security.SecurityUtils;
 
 import java.io.ByteArrayOutputStream;
@@ -18,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -50,17 +56,27 @@ public class SshExecutor implements Closeable {
         }
         try {
             client = SshClient.setUpDefaultClient();
+            if (config.isPasswordOnly()) {
+                // 在 start/connect 前关闭所有隐式密钥来源，避免 ~/.ssh/config 中的 IdentityFile
+                // 或默认身份加载先于密码认证；只保留密码及单密码交互认证。
+                client.setHostConfigEntryResolver(HostConfigEntryResolver.EMPTY);
+                client.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
+                client.setAgentFactory(null);
+                client.setUserAuthFactories(Arrays.<UserAuthFactory>asList(
+                        UserAuthPasswordFactory.INSTANCE, UserAuthKeyboardInteractiveFactory.INSTANCE));
+            }
             client.start();
             ClientSession s = client
                     .connect(config.getUsername(), config.getHost(), config.getPort())
                     .verify(config.getConnectTimeoutMs())
                     .getSession();
-            if (config.getPrivateKeyPath() != null && !config.getPrivateKeyPath().isEmpty()) {
+            if (!config.isPasswordOnly()
+                    && config.getPrivateKeyPath() != null && !config.getPrivateKeyPath().isEmpty()) {
                 for (KeyPair kp : loadKeyPairs()) {
                     s.addPublicKeyIdentity(kp);
                 }
             }
-            if (config.getPassword() != null) {
+            if (config.getPassword() != null && !config.getPassword().isEmpty()) {
                 s.addPasswordIdentity(config.getPassword());
             }
             s.auth().verify(config.getConnectTimeoutMs());

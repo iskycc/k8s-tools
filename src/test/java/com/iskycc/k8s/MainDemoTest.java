@@ -9,7 +9,15 @@ import org.junit.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -41,17 +49,67 @@ public class MainDemoTest {
 
     @Test
     public void mainRunsFullFlowAgainstSimulatedCluster() throws Exception {
+        assertMainFlow();
+    }
+
+    @Test
+    public void passwordOnlyIgnoresCliKeyAndRunsFullFlow() throws Exception {
+        Path directory = Files.createTempDirectory("k8s-cli-missing-key-");
+        try {
+            assertMainFlow("--key", directory.resolve("missing-key").toString(), "--password-only");
+        } finally {
+            Files.deleteIfExists(directory);
+        }
+    }
+
+    @Test
+    public void passwordOnlyWithoutPasswordExitsBeforeConnecting() throws Exception {
+        Path output = Files.createTempFile("k8s-cli-validation-", ".txt");
+        String java = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
+        String classpath = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+        Process process = new ProcessBuilder(java, "-cp", classpath, Main.class.getName(),
+                "--host", "127.0.0.1", "--password-only", "--key", "unused-key")
+                .redirectErrorStream(true).redirectOutput(output.toFile()).start();
+        try {
+            assertTrue(process.waitFor(20, TimeUnit.SECONDS));
+            assertEquals(2, process.exitValue());
+            String result = new String(Files.readAllBytes(output), StandardCharsets.UTF_8);
+            assertTrue(result.contains("--password-only 必须同时提供非空 --password"));
+            assertTrue(!result.contains("[1/3]"));
+        } finally {
+            process.destroyForcibly();
+            Files.deleteIfExists(output);
+        }
+    }
+
+    @Test
+    public void helpExplainsPasswordOnly() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        PrintStream original = System.out;
+        try (PrintStream capture = new PrintStream(output, true, "UTF-8")) {
+            System.setOut(capture);
+            Main.main(new String[]{"--help"});
+        } finally {
+            System.setOut(original);
+        }
+        String help = new String(output.toByteArray(), StandardCharsets.UTF_8);
+        assertTrue(help.contains("--password-only"));
+        assertTrue(help.contains("SSH agent"));
+    }
+
+    private void assertMainFlow(String... additionalArgs) throws Exception {
+        List<String> args = new ArrayList<String>(Arrays.asList(
+                "--host", "127.0.0.1",
+                "--port", String.valueOf(master.getPort()),
+                "--user", "root",
+                "--password", "demo-password",
+                "--namespace", "default"));
+        args.addAll(Arrays.asList(additionalArgs));
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
         PrintStream original = System.out;
         System.setOut(new PrintStream(buf, true, "UTF-8"));
         try {
-            Main.main(new String[]{
-                    "--host", "127.0.0.1",
-                    "--port", String.valueOf(master.getPort()),
-                    "--user", "root",
-                    "--password", "demo-password",
-                    "--namespace", "default"
-            });
+            Main.main(args.toArray(new String[0]));
         } catch (Exception e) {
             System.setOut(original);
             throw new AssertionError("Main 执行失败", e);

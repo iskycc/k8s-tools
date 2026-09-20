@@ -28,7 +28,7 @@ mvn -Dtest=MainDemoTest test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 无集群的 CLI 启动检查
-java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.2.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
@@ -58,10 +58,11 @@ java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
 - CLI 的 `--namespace` 只影响资源查询。`null`、空白或 `all` 表示全命名空间；CLI 没有公开全部 Java 配置项。
 - token 来自 Secret，当前没有自动续期；不要承诺“永久有效”。`MasterInfo.toString()` 掩码 token，不要新增记录完整 token、密码或私钥的日志。
 - SSH 当前接受任意主机密钥。SA/Secret/RBAC 资源名和重试参数在连接前校验，远端绝对路径及 Secret JSON 使用 shell 引号转义；新命令仍需保证外部输入不被当作 shell 代码。
+- SSH 仅配置密码时自动使用密码模式；`SshConfig.Builder.passwordOnly(true)` / CLI `--password-only` 强制忽略显式私钥与口令、本地 `.ssh/config`、默认私钥和 SSH agent。仅保留 password / 单密码 keyboard-interactive，不回退到用户密钥签名认证；混合凭据未强制时保留原先行为。此功能从 `1.2.0` 起提供，`1.1.0` 不包含这些改动，源码更新也不表示远端快照已经更新。
 
 ## 通用资源 API 约定
 
-- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，可运行的查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.1.0-SNAPSHOT`。
+- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，可运行的查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.2.0-SNAPSHOT`。
 - `ResourceDefinition` 明确 apiVersion、plural、Kind 和作用域；`K8sResources` 是常用常量，不是完整 API 清单。CRD 和其他资源用 Discovery 或显式定义，禁止推测 Kind 的复数。
 - 写入使用完整 Gson JSON，保留未知字段并复制输入；原有简化 POJO 只用于读取，不能拿它们做完整 PUT。PUT 要求 `metadata.resourceVersion`，冲突交由调用方合并。
 - 集群资源不能指定 namespace；命名空间资源的单对象读写和集合删除必须有具体 namespace。只有旧 list 快捷方法把字符串 `all` 解释为跨命名空间，新入口的 `all` 是真实命名空间。
@@ -75,6 +76,7 @@ java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
 - 日常验证使用本地模拟服务，无需真实集群、Docker 或本地 `kubectl`。只有任务本身涉及真实环境时才接入相应集群；运行 CLI 或 `fetch()` 包含资源创建、授权及可能的删除操作。
 - 测试使用 JUnit 4。新增测试服务绑定 `127.0.0.1` 的随机端口，并可靠关闭服务器和临时资源。避免依赖测试执行顺序；带状态的 SA 场景按需使用独立 mock 实例。
 - SSH 命令或 token 流程变更：核对 `MockK8sMasterServer` 的匹配规则，验证复用、新建、重建、禁用重建和异常路径。模拟器的成功响应不能作为真实 Kubernetes 接受命令的证据。
+- SSH 认证变更：运行 `SshExecutorTest` 与 CLI/E2E 回归。使用临时私钥、独立 home 和 loopback SSH 验证本地配置隔离、错误密码不回退、交互密码与私钥兼容；不得修改或读取真实用户的 `.ssh` 身份文件作为测试数据。
 - API 路由或模型变更：同步 `MockK8sApiServer` 的路由、fixture 和行为断言，覆盖指定命名空间、全命名空间和集群资源。写 API 需核对真实 HTTP 方法、query 编码、Content-Type、正文保留、冲突/权限错误和不重放行为。
 - TLS、认证、异常处理变更：验证对应的成功与失败行为，包括严格模式和自动降级；CLI 参数或输出变更同步核对 `MainDemoTest` 与 `Main.usage()`。
 - 按改动范围先运行相关测试。Java 代码、依赖或构建配置变更交付前运行 `mvn test`；若已运行成功的 `mvn package`，其中的测试无需重复执行。纯文档改动核对命令、链接和实际默认值即可，无需新增测试。

@@ -11,6 +11,7 @@ public final class SshConfig {
     private final String password;
     private final String privateKeyPath;
     private final String privateKeyPassphrase;
+    private final boolean passwordOnly;
     private final int connectTimeoutMs;
 
     private SshConfig(Builder b) {
@@ -20,6 +21,9 @@ public final class SshConfig {
         this.password = b.password;
         this.privateKeyPath = b.privateKeyPath;
         this.privateKeyPassphrase = b.privateKeyPassphrase;
+        this.passwordOnly = b.passwordOnly
+                || ((b.privateKeyPath == null || b.privateKeyPath.isEmpty())
+                    && b.password != null && !b.password.isEmpty());
         this.connectTimeoutMs = b.connectTimeoutMs;
     }
 
@@ -51,6 +55,11 @@ public final class SshConfig {
         return privateKeyPassphrase;
     }
 
+    /** 是否仅用密码认证；仅配置密码时自动启用。 */
+    public boolean isPasswordOnly() {
+        return passwordOnly;
+    }
+
     public int getConnectTimeoutMs() {
         return connectTimeoutMs;
     }
@@ -67,6 +76,7 @@ public final class SshConfig {
         private String password;
         private String privateKeyPath;
         private String privateKeyPassphrase;
+        private boolean passwordOnly;
         private int connectTimeoutMs = 15000;
 
         public Builder host(String host) {
@@ -99,6 +109,19 @@ public final class SshConfig {
             return this;
         }
 
+        /**
+         * 强制仅使用密码认证，忽略配置中的私钥及私钥口令、本地 SSH 配置、默认密钥与 SSH agent。
+         * 支持 password 及单密码 keyboard-interactive，不进行用户公钥签名认证。
+         * 必须同时提供非空 password；未设置私钥路径时自动使用此模式。
+         *
+         * @param passwordOnly true 强制使用密码；false 保留按凭据选择的默认行为
+         * @return 当前 builder
+         */
+        public Builder passwordOnly(boolean passwordOnly) {
+            this.passwordOnly = passwordOnly;
+            return this;
+        }
+
         public Builder connectTimeoutMs(int connectTimeoutMs) {
             this.connectTimeoutMs = connectTimeoutMs;
             return this;
@@ -110,6 +133,9 @@ public final class SshConfig {
             }
             if (username == null || username.trim().isEmpty()) {
                 throw new IllegalArgumentException("SSH username is required");
+            }
+            if (passwordOnly && (password == null || password.isEmpty())) {
+                throw new IllegalArgumentException("password is required when passwordOnly is enabled");
             }
             if ((password == null || password.isEmpty())
                     && (privateKeyPath == null || privateKeyPath.isEmpty())) {
