@@ -14,6 +14,8 @@ import com.iskycc.k8s.mock.MockK8sMasterServer;
 import com.iskycc.k8s.ssh.MasterInfo;
 import com.iskycc.k8s.ssh.ServiceTokenFetcher;
 import com.iskycc.k8s.ssh.SshConfig;
+import com.iskycc.k8s.ssh.SshExecutor;
+import com.iskycc.k8s.ssh.ExecResult;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -111,6 +113,33 @@ public class K8sToolsE2ETest {
         return new ServiceTokenFetcher(sshConfig(master, SSH_PASSWORD), fastOptions()).fetch();
     }
 
+    @Test
+    public void e2e_mockRejectsTokenSecretWithoutServiceAccountAnnotation() throws Exception {
+        try (MockK8sMasterServer master = newMaster(MockK8sMasterServer.SaScenario.FRESH_CLUSTER);
+             SshExecutor executor = new SshExecutor(sshConfig(master, SSH_PASSWORD))) {
+            executor.connect();
+            ExecResult response = executor.exec("kubectl -n kube-system create secret generic k8s-tools-token"
+                    + " --type=kubernetes.io/service-account-token", 10000);
+            assertFalse(response.isSuccess());
+            assertTrue(response.getStderr().contains("Required value"));
+        }
+    }
+
+    @Test
+    public void e2e_invalidPublicOptionsFailBeforeConnectingOrMutating() throws Exception {
+        try (MockK8sMasterServer master = newMaster(MockK8sMasterServer.SaScenario.FRESH_CLUSTER)) {
+            for (ServiceTokenFetcher.Options options : new ServiceTokenFetcher.Options[]{
+                    fastOptions().serviceAccount("tool; touch /tmp/unwanted"),
+                    fastOptions().serviceAccountNamespace("../../other"),
+                    fastOptions().clusterRole("admin$(command)"),
+                    fastOptions().tokenWaitRetries(-1)}) {
+                org.junit.Assert.assertThrows(IllegalArgumentException.class,
+                        () -> new ServiceTokenFetcher(sshConfig(master, SSH_PASSWORD), options).fetch());
+            }
+            assertTrue(master.getExecutedCommands().isEmpty());
+        }
+    }
+
     // ==================================================================
     // 主流程 E2E：全新集群，创建 SA + 永久 token secret + 自动发现 API 地址
     // ==================================================================
@@ -132,10 +161,11 @@ public class K8sToolsE2ETest {
                 cmds.contains("kubectl -n kube-system get sa k8s-tools"));
         assertTrue("SA 不存在时应创建",
                 cmds.contains("kubectl create serviceaccount k8s-tools -n kube-system"));
-        assertTrue("应创建 service-account-token 类型的永久 secret",
-                cmds.contains("kubectl -n kube-system create secret generic k8s-tools-token"
-                        + " --type=kubernetes.io/service-account-token"));
-        assertTrue("应将 secret 绑定到 SA",
+        assertNotNull("应提交完整 Secret 清单", freshMaster.getCreatedSecretManifest());
+        assertEquals("kubernetes.io/service-account-token", freshMaster.getCreatedSecretManifest().get("type").getAsString());
+        assertEquals("k8s-tools", freshMaster.getCreatedSecretManifest().getAsJsonObject("metadata")
+                .getAsJsonObject("annotations").get("kubernetes.io/service-account.name").getAsString());
+        assertFalse("新建时已经包含注解，无需再注解",
                 cmds.contains("kubectl -n kube-system annotate secret k8s-tools-token"
                         + " kubernetes.io/service-account.name=k8s-tools --overwrite"));
         int tokenReads = 0;
@@ -209,6 +239,7 @@ public class K8sToolsE2ETest {
 
         assertEquals("老集群应直接复用 SA 自动生成的 secret 中的永久 token",
                 SA_TOKEN, info.getToken());
+        org.junit.Assert.assertNull(legacyMaster.getCreatedSecretManifest());
 
         List<String> cmds = legacyMaster.getExecutedCommands();
         assertTrue(cmds.contains("kubectl -n kube-system get sa k8s-tools"));
@@ -233,6 +264,7 @@ public class K8sToolsE2ETest {
         MasterInfo info = fetchFrom(rerunMaster);
 
         assertEquals(SA_TOKEN, info.getToken());
+        org.junit.Assert.assertNull(rerunMaster.getCreatedSecretManifest());
         assertEquals("kubeconfig 损坏时应自动从 /etc/kubernetes/admin.conf 发现 API 地址",
                 "https://10.96.0.1:6443", info.getApiServerUrl());
 
@@ -263,9 +295,7 @@ public class K8sToolsE2ETest {
         assertTrue("删除后应重建 SA", idxRecreate > idxDeleteSa);
         assertTrue("应清理残留的手动 secret",
                 cmds.contains("kubectl -n kube-system delete secret k8s-tools-token --ignore-not-found"));
-        assertTrue("残留 secret 导致 AlreadyExists 时应容忍并继续",
-                cmds.contains("kubectl -n kube-system create secret generic k8s-tools-token"
-                        + " --type=kubernetes.io/service-account-token"));
+        assertNotNull("残留 Secret 导致 AlreadyExists 时应容忍并继续", brokenMaster.getCreatedSecretManifest());
         assertTrue(cmds.contains("kubectl -n kube-system annotate secret k8s-tools-token"
                 + " kubernetes.io/service-account.name=k8s-tools --overwrite"));
         // 删除前读取损坏 secret 的记录

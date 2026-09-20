@@ -1,13 +1,14 @@
 package com.iskycc.k8s.ssh;
 
 import com.iskycc.k8s.K8sToolsException;
+import com.google.gson.JsonObject;
 
 import java.io.Closeable;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 /**
- * 通过 SSH 登录 k8s master 节点，创建/复用专用 ServiceAccount 并获取其<b>永久 token</b>，
+ * 通过 SSH 登录 k8s master 节点，创建/复用专用 ServiceAccount 并获取其长期 token，
  * 同时自动发现 API Server 地址、收集集群 CA 证书。
  *
  * <p><b>SA 处理策略</b>：先检查 SA 是否已存在；
@@ -15,11 +16,11 @@ import java.util.Base64;
  * 则先删除该 SA（连同本工具创建的残留 secret）再重建，保证从零拿到可用 token。
  *
  * <p><b>永久 token</b>：{@code kubernetes.io/service-account-token} Secret 中的 token 由
- * token controller 签发，永久有效、不过期：
+ * token controller 签发；删除关联对象或服务端失效处理会使 token 不再可用：
  * <ol>
  *   <li>老集群(&lt;1.24)：SA 自动生成的 token secret，直接读取复用；</li>
  *   <li>本工具创建过的手动 secret，直接读取复用（幂等重跑）；</li>
- *   <li>新集群(&gt;=1.24)：手动创建 secret + annotate 绑定 SA，
+ *   <li>新集群(&gt;=1.24)：创建时即带有 SA 注解的 secret，
  *       轮询等待 controller 填充 {@code data.token}（AlreadyExists 容忍）。</li>
  * </ol>
  *
@@ -63,6 +64,7 @@ public class ServiceTokenFetcher implements Closeable {
      */
     public MasterInfo fetch() {
         try {
+            options.validate();
             ssh.connect();
             boolean saExisted = ensureServiceAccount();
             String token = fetchPermanentToken(saExisted);
@@ -158,19 +160,32 @@ public class ServiceTokenFetcher implements Closeable {
             recreateServiceAccount(manualSecret);
         }
 
-        // 手动创建永久 token secret（新集群 >=1.24 或 SA 刚重建）
-        ExecResult create = ssh.exec("kubectl -n " + ns + " create secret generic " + manualSecret
-                + " --type=kubernetes.io/service-account-token", options.commandTimeoutMs);
+        // API Server 在创建时就校验 SA 注解，必须把注解与 Secret 一次提交。
+        JsonObject secret = new JsonObject();
+        secret.addProperty("apiVersion", "v1");
+        secret.addProperty("kind", "Secret");
+        secret.addProperty("type", "kubernetes.io/service-account-token");
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("name", manualSecret);
+        metadata.addProperty("namespace", ns);
+        JsonObject annotations = new JsonObject();
+        annotations.addProperty("kubernetes.io/service-account.name", sa);
+        metadata.add("annotations", annotations);
+        secret.add("metadata", metadata);
+        ExecResult create = ssh.exec("printf '%s' " + shellQuote(secret.toString())
+                + " | kubectl -n " + ns + " create -f -", options.commandTimeoutMs);
         if (!create.isSuccess() && !isAlreadyExists(create)) {
             throw new K8sToolsException("创建永久 token Secret " + ns + "/" + manualSecret
                     + " 失败: " + create.combinedOutput());
         }
-        ExecResult annotate = ssh.exec("kubectl -n " + ns + " annotate secret " + manualSecret
-                + " kubernetes.io/service-account.name=" + sa + " --overwrite",
-                options.commandTimeoutMs);
-        if (!annotate.isSuccess()) {
-            throw new K8sToolsException("为 Secret " + ns + "/" + manualSecret
-                    + " 绑定 ServiceAccount 失败: " + annotate.combinedOutput());
+        if (!create.isSuccess()) {
+            ExecResult annotate = ssh.exec("kubectl -n " + ns + " annotate secret " + manualSecret
+                    + " kubernetes.io/service-account.name=" + sa + " --overwrite",
+                    options.commandTimeoutMs);
+            if (!annotate.isSuccess()) {
+                throw new K8sToolsException("为 Secret " + ns + "/" + manualSecret
+                        + " 绑定 ServiceAccount 失败: " + annotate.combinedOutput());
+            }
         }
         String token = readSecretTokenWithRetry(manualSecret);
         if (token == null) {
@@ -256,7 +271,7 @@ public class ServiceTokenFetcher implements Closeable {
             return url;
         }
         // 2) master 上的 admin.conf
-        ExecResult conf = ssh.exec("awk '/server:/{print $2; exit}' " + options.kubeConfigPath,
+        ExecResult conf = ssh.exec("awk '/server:/{print $2; exit}' " + shellQuote(options.kubeConfigPath),
                 options.commandTimeoutMs);
         url = conf.getStdout().trim();
         if (conf.isSuccess() && !url.isEmpty()) {
@@ -267,7 +282,7 @@ public class ServiceTokenFetcher implements Closeable {
     }
 
     private String fetchCaCert() {
-        ExecResult r = ssh.exec("cat " + options.caCertPath, options.commandTimeoutMs);
+        ExecResult r = ssh.exec("cat -- " + shellQuote(options.caCertPath), options.commandTimeoutMs);
         if (r.isSuccess() && r.getStdout().contains("BEGIN CERTIFICATE")) {
             return r.getStdout().trim();
         }
@@ -278,6 +293,10 @@ public class ServiceTokenFetcher implements Closeable {
     private static boolean isAlreadyExists(ExecResult r) {
         String out = r.combinedOutput();
         return out.contains("AlreadyExists") || out.contains("already exists");
+    }
+
+    private static String shellQuote(String value) {
+        return "'" + value.replace("'", "'\"'\"'") + "'";
     }
 
     @Override
@@ -305,6 +324,32 @@ public class ServiceTokenFetcher implements Closeable {
         private String caCertPath = "/etc/kubernetes/pki/ca.crt";
         private boolean fetchCaCert = true;
         private int commandTimeoutMs = 30000;
+
+        private void validate() {
+            requireResourceName(serviceAccount, "serviceAccount", false);
+            if (serviceAccountNamespace == null || serviceAccountNamespace.length() > 63
+                    || !serviceAccountNamespace.matches("[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")) {
+                throw new IllegalArgumentException("serviceAccountNamespace must be a DNS label");
+            }
+            requireResourceName(clusterRole, "clusterRole", true);
+            if (clusterRoleBindingName != null) { requireResourceName(clusterRoleBindingName, "clusterRoleBindingName", true); }
+            requireResourceName(permanentTokenSecretName == null ? serviceAccount + "-token" : permanentTokenSecretName,
+                    "permanentTokenSecretName", false);
+            if (tokenWaitRetries < 0 || tokenWaitIntervalMs < 0 || commandTimeoutMs <= 0) {
+                throw new IllegalArgumentException("invalid retry or timeout configuration");
+            }
+            if (kubeConfigPath == null || !kubeConfigPath.startsWith("/")
+                    || caCertPath == null || !caCertPath.startsWith("/")) {
+                throw new IllegalArgumentException("kubeConfigPath and caCertPath must be absolute remote paths");
+            }
+        }
+
+        private static void requireResourceName(String value, String option, boolean rbac) {
+            String pattern = rbac ? "[A-Za-z0-9][A-Za-z0-9_.:-]*" : "[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?";
+            if (value == null || value.length() > 253 || !value.matches(pattern)) {
+                throw new IllegalArgumentException("invalid " + option);
+            }
+        }
 
         public Options serviceAccount(String v) { this.serviceAccount = v; return this; }
         public Options serviceAccountNamespace(String v) { this.serviceAccountNamespace = v; return this; }

@@ -1,6 +1,10 @@
 package com.iskycc.k8s.api;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
 import com.iskycc.k8s.K8sToolsException;
@@ -12,35 +16,57 @@ import com.iskycc.k8s.api.model.Pod;
 import com.iskycc.k8s.api.model.Service;
 import com.iskycc.k8s.api.model.VersionInfo;
 import com.iskycc.k8s.ssh.MasterInfo;
+import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.BasicHttpClientConnectionManager;
+import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
+import org.apache.hc.client5.http.ssl.DefaultHostnameVerifier;
+import org.apache.hc.client5.http.ssl.HostnameVerificationPolicy;
+import org.apache.hc.client5.http.ssl.TlsSocketStrategy;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.Header;
+import org.apache.hc.core5.http.config.RegistryBuilder;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.http.io.entity.StringEntity;
+import org.apache.hc.core5.net.URIBuilder;
+import org.apache.hc.core5.util.Timeout;
 
 import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
-import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Map;
 
 /**
- * 使用 ServiceAccount Bearer Token 调用 k8s API 的工具类（JDK8 原生 HttpURLConnection，无额外 HTTP 依赖）。
+ * 使用 Bearer Token 调用 Kubernetes REST API，兼容 Java 8，支持通用资源增删查改与 Discovery。
  *
  * <p>TLS 模式：
  * <ul>
  *   <li>提供集群 CA 证书 PEM（可由 {@code ServiceTokenFetcher} 从 master 带回）→ 严格校验</li>
- *   <li><b>自动降级（默认开启）</b>：CA 校验失败（自签名/证书过期/主机名不匹配等）时，
+ *   <li><b>读取自动降级（默认开启）</b>：GET/HEAD 的 CA 校验失败（自签名/证书过期/主机名不匹配等）时，
  *       自动改用 trust-all 重试，保证对内网自签名集群可用；{@code tlsAutoFallback(false)} 可关闭</li>
  *   <li>insecureSkipTlsVerify=true：直接跳过证书校验</li>
  *   <li>不带 CA：使用 JVM 默认信任库（配合自动降级同样能容忍自签名证书）</li>
@@ -55,7 +81,7 @@ import java.util.List;
  */
 public class K8sApiClient {
 
-    private static final String USER_AGENT = "iskycc-k8s-tools/1.0";
+    private static final String USER_AGENT = "iskycc-k8s-tools/1.1";
 
     private final String apiServer;
     private final String token;
@@ -66,8 +92,7 @@ public class K8sApiClient {
     private final Gson gson = new Gson();
 
     /** 可运行期降级为 trust-all（忽略自签名证书）。 */
-    private volatile SSLSocketFactory sslSocketFactory;
-    private volatile HostnameVerifier hostnameVerifier;
+    private volatile TlsSettings tlsSettings;
     private volatile boolean degradedToInsecure;
 
     private K8sApiClient(Builder b) {
@@ -77,13 +102,8 @@ public class K8sApiClient {
         this.readTimeoutMs = b.readTimeoutMs;
         this.tlsAutoFallback = b.tlsAutoFallback;
         this.insecureConfigured = b.insecureSkipTlsVerify;
-        if (this.apiServer.startsWith("https")) {
-            this.sslSocketFactory = buildSslSocketFactory(b);
-            this.hostnameVerifier = b.insecureSkipTlsVerify ? INSECURE_HOSTNAME_VERIFIER : null;
-        } else {
-            this.sslSocketFactory = null;
-            this.hostnameVerifier = null;
-        }
+        this.tlsSettings = new TlsSettings(buildSslContext(b),
+                b.insecureSkipTlsVerify ? INSECURE_HOSTNAME_VERIFIER : new DefaultHostnameVerifier());
     }
 
     public static Builder builder() {
@@ -144,7 +164,7 @@ public class K8sApiClient {
     public List<Pod> listPods(String namespace) {
         String path = isAllNamespaces(namespace)
                 ? "/api/v1/pods"
-                : "/api/v1/namespaces/" + namespace + "/pods";
+                : "/api/v1/namespaces/" + K8sResourceClient.pathSegment(namespace) + "/pods";
         return parseList(getRaw(path), Pod.class);
     }
 
@@ -152,7 +172,7 @@ public class K8sApiClient {
     public List<Service> listServices(String namespace) {
         String path = isAllNamespaces(namespace)
                 ? "/api/v1/services"
-                : "/api/v1/namespaces/" + namespace + "/services";
+                : "/api/v1/namespaces/" + K8sResourceClient.pathSegment(namespace) + "/services";
         return parseList(getRaw(path), Service.class);
     }
 
@@ -160,11 +180,76 @@ public class K8sApiClient {
     public List<Deployment> listDeployments(String namespace) {
         String path = isAllNamespaces(namespace)
                 ? "/apis/apps/v1/deployments"
-                : "/apis/apps/v1/namespaces/" + namespace + "/deployments";
+                : "/apis/apps/v1/namespaces/" + K8sResourceClient.pathSegment(namespace) + "/deployments";
         return parseList(getRaw(path), Deployment.class);
     }
 
-    // ==================== 通用 GET ====================
+    // ==================== 通用资源与 Discovery ====================
+
+    public K8sResourceClient resource(ResourceDefinition definition) {
+        if (definition == null) { throw new IllegalArgumentException("resource definition is required"); }
+        return new K8sResourceClient(this, definition, null);
+    }
+
+    /** 根据 Discovery 确定作用域、Kind 和支持的动作，不猜测自定义资源名称。 */
+    public K8sResourceClient resource(String apiVersion, String plural) {
+        if (plural == null || plural.isEmpty()) { throw new IllegalArgumentException("resource name is required"); }
+        for (ApiResource resource : discoverResources(apiVersion)) {
+            if (plural.equals(resource.getName())) {
+                return resource(resource.toDefinition(apiVersion));
+            }
+        }
+        throw new IllegalArgumentException("Resource not advertised by API discovery: " + apiVersion + "/" + plural);
+    }
+
+    public K8sResourceClient pods(String namespace) { return resource(K8sResources.PODS).inNamespace(namespace); }
+    public K8sResourceClient services(String namespace) { return resource(K8sResources.SERVICES).inNamespace(namespace); }
+    public K8sResourceClient deployments(String namespace) { return resource(K8sResources.DEPLOYMENTS).inNamespace(namespace); }
+    public K8sResourceClient configMaps(String namespace) { return resource(K8sResources.CONFIG_MAPS).inNamespace(namespace); }
+    public K8sResourceClient secrets(String namespace) { return resource(K8sResources.SECRETS).inNamespace(namespace); }
+    public K8sResourceClient namespaces() { return resource(K8sResources.NAMESPACES); }
+    public K8sResourceClient nodes() { return resource(K8sResources.NODES); }
+
+    /** 查询某个 API 版本的资源和子资源；返回值包括服务端声明的 verbs。 */
+    public List<ApiResource> discoverResources(String apiVersion) {
+        String base = ResourceDefinition.cluster(apiVersion, "resources", "APIResource").basePath();
+        JsonObject document = parseObject(getRaw(base));
+        if (!document.has("resources") || !document.get("resources").isJsonArray()) {
+            throw new K8sToolsException("Discovery response has no resources array");
+        }
+        List<ApiResource> resources = new ArrayList<ApiResource>();
+        for (JsonElement element : document.getAsJsonArray("resources")) {
+            if (!element.isJsonObject()) { throw new K8sToolsException("Invalid API discovery resource"); }
+            try {
+                ApiResource resource = gson.fromJson(element, ApiResource.class);
+                if (resource.getName() == null || resource.getKind() == null) {
+                    throw new K8sToolsException("Discovery resource is missing name or kind");
+                }
+                resources.add(resource);
+            } catch (JsonSyntaxException e) {
+                throw new K8sToolsException("Invalid API discovery resource", e);
+            }
+        }
+        return Collections.unmodifiableList(resources);
+    }
+
+    /** 返回 /api 和 /apis 中服务端声明的所有版本；不忽略认证或聚合 API 错误。 */
+    public List<String> discoverApiVersions() {
+        LinkedHashSet<String> versions = new LinkedHashSet<String>();
+        JsonArray core = parseObject(getRaw("/api")).getAsJsonArray("versions");
+        if (core == null) { throw new K8sToolsException("Discovery response has no versions array"); }
+        for (JsonElement version : core) { versions.add(version.getAsString()); }
+        JsonArray groups = parseObject(getRaw("/apis")).getAsJsonArray("groups");
+        if (groups == null) { throw new K8sToolsException("Discovery response has no groups array"); }
+        for (JsonElement group : groups) {
+            for (JsonElement version : group.getAsJsonObject().getAsJsonArray("versions")) {
+                versions.add(version.getAsJsonObject().get("groupVersion").getAsString());
+            }
+        }
+        return Collections.unmodifiableList(new ArrayList<String>(versions));
+    }
+
+    // ==================== 通用 HTTP ====================
 
     /**
      * 对任意 API path 发起带 Bearer Token 的 GET 请求，返回原始 JSON 字符串。
@@ -173,13 +258,41 @@ public class K8sApiClient {
      * @param path 以 / 开头的 API 路径，如 /api/v1/namespaces/default/pods
      */
     public String getRaw(String path) {
+        return request("GET", path, null, null, null).getBody();
+    }
+
+    /**
+     * 通用 REST 请求；body 是原始 JSON/文本，响应保留状态码和多值响应头。
+     * 不跟随重定向，不自动重试写入。只有 GET/HEAD 保留兼容的 TLS 自动降级。
+     * @param method GET、HEAD、OPTIONS、POST、PUT、PATCH 或 DELETE
+     * @param path API 路径，可带已有 query，必须以单个 / 开头
+     * @param query 附加查询参数，原文传入，由客户端统一 URL 编码
+     * @param body 请求正文；没有正文时为 null
+     * @param contentType 有正文时必填的媒体类型
+     * @return 2xx 响应；其他状态抛 K8sApiException
+     */
+    public ApiResponse request(String method, String path, Map<String, String> query,
+                               String body, String contentType) {
+        if (method == null || !Arrays.asList("GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE")
+                .contains(method.toUpperCase(Locale.ROOT))) {
+            throw new IllegalArgumentException("unsupported HTTP method");
+        }
+        String verb = method.toUpperCase(Locale.ROOT);
+        if (("GET".equals(verb) || "HEAD".equals(verb)) && body != null) {
+            throw new IllegalArgumentException("GET/HEAD must not have a request body");
+        }
+        if (body != null && (contentType == null || contentType.trim().isEmpty())) {
+            throw new IllegalArgumentException("contentType is required for a request body");
+        }
+        URI uri = requestUri(path, query);
         try {
-            return doGet(path);
+            return doRequest(verb, uri, body, contentType);
         } catch (K8sApiException e) {
-            if (tlsAutoFallback && !insecureConfigured && !degradedToInsecure
+            if (("GET".equals(verb) || "HEAD".equals(verb))
+                    && tlsAutoFallback && !insecureConfigured && !degradedToInsecure
                     && e.getStatusCode() == -1 && isTlsError(e)) {
                 degradeToInsecure();
-                return doGet(path);
+                return doRequest(verb, uri, body, contentType);
             }
             throw e;
         }
@@ -192,8 +305,7 @@ public class K8sApiClient {
         try {
             SSLContext ctx = SSLContext.getInstance("TLS");
             ctx.init(null, new TrustManager[]{TRUST_ALL_MANAGER}, null);
-            this.sslSocketFactory = ctx.getSocketFactory();
-            this.hostnameVerifier = INSECURE_HOSTNAME_VERIFIER;
+            this.tlsSettings = new TlsSettings(ctx, INSECURE_HOSTNAME_VERIFIER);
             this.degradedToInsecure = true;
         } catch (GeneralSecurityException e) {
             throw new K8sToolsException("TLS 自动降级失败: " + e.getMessage(), e);
@@ -218,43 +330,78 @@ public class K8sApiClient {
         return false;
     }
 
-    private String doGet(String path) {
-        if (path == null || !path.startsWith("/")) {
-            throw new IllegalArgumentException("path must start with '/': " + path);
+    private URI requestUri(String path, Map<String, String> query) {
+        if (path == null || !path.startsWith("/") || path.startsWith("//")
+                || path.indexOf('#') >= 0 || path.indexOf('\\') >= 0) {
+            throw new IllegalArgumentException("path must be an API path starting with a single '/'");
         }
-        HttpURLConnection conn = null;
         try {
-            URL url = new URL(apiServer + path);
-            conn = (HttpURLConnection) url.openConnection();
-            if (conn instanceof HttpsURLConnection && sslSocketFactory != null) {
-                HttpsURLConnection https = (HttpsURLConnection) conn;
-                https.setSSLSocketFactory(sslSocketFactory);
-                HostnameVerifier verifier = hostnameVerifier;
-                if (verifier != null) {
-                    https.setHostnameVerifier(verifier);
+            URIBuilder builder = new URIBuilder(apiServer + path);
+            if (query != null) {
+                for (Map.Entry<String, String> entry : query.entrySet()) {
+                    if (entry.getKey() == null || entry.getValue() == null) {
+                        throw new IllegalArgumentException("query parameter names and values must not be null");
+                    }
+                    builder.addParameter(entry.getKey(), entry.getValue());
                 }
             }
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(connectTimeoutMs);
-            conn.setReadTimeout(readTimeoutMs);
-            conn.setRequestProperty("Authorization", "Bearer " + token);
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", USER_AGENT);
+            return builder.build();
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid API path", e);
+        }
+    }
 
-            int code = conn.getResponseCode();
-            String body = readBody(code < 400 ? conn.getInputStream() : conn.getErrorStream());
-            if (code < 200 || code >= 300) {
-                throw new K8sApiException(code, body);
-            }
-            return body;
-        } catch (K8sApiException e) {
-            throw e;
+    private ApiResponse doRequest(String method, URI uri, String body, String contentType) {
+        TlsSettings tls = tlsSettings;
+        BasicHttpClientConnectionManager manager = BasicHttpClientConnectionManager.create(
+                RegistryBuilder.<TlsSocketStrategy>create().register("https",
+                        new DefaultClientTlsStrategy(tls.context, HostnameVerificationPolicy.CLIENT,
+                                tls.verifier)).build());
+        manager.setConnectionConfig(ConnectionConfig.custom()
+                .setConnectTimeout(Timeout.ofMilliseconds(connectTimeoutMs))
+                .setSocketTimeout(Timeout.ofMilliseconds(readTimeoutMs)).build());
+        HttpUriRequestBase request = new HttpUriRequestBase(method, uri);
+        request.setConfig(RequestConfig.custom()
+                .setResponseTimeout(Timeout.ofMilliseconds(readTimeoutMs))
+                .setConnectionRequestTimeout(Timeout.ofMilliseconds(connectTimeoutMs)).build());
+        request.setHeader("Authorization", "Bearer " + token);
+        request.setHeader("Accept", "application/json");
+        request.setHeader("User-Agent", USER_AGENT);
+        if (body != null) {
+            request.setEntity(new StringEntity(body,
+                    ContentType.parse(contentType).withCharset(StandardCharsets.UTF_8)));
+        }
+        try (CloseableHttpClient http = HttpClients.custom().setConnectionManager(manager)
+                .disableRedirectHandling().disableAutomaticRetries().disableCookieManagement().build()) {
+            return http.execute(request, response -> {
+                String text = response.getEntity() == null ? ""
+                        : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                Map<String, List<String>> headers = new LinkedHashMap<String, List<String>>();
+                for (Header header : response.getHeaders()) {
+                    String name = header.getName().toLowerCase(Locale.ROOT);
+                    if (!headers.containsKey(name)) { headers.put(name, new ArrayList<String>()); }
+                    headers.get(name).add(header.getValue());
+                }
+                ApiResponse result = new ApiResponse(response.getCode(), text, headers);
+                if (response.getCode() < 200 || response.getCode() >= 300) {
+                    throw new K8sApiException(result);
+                }
+                return result;
+            });
         } catch (IOException e) {
-            throw new K8sApiException("请求 k8s api 失败: " + apiServer + path + " - " + e.getMessage(), e);
+            throw new K8sApiException("请求 k8s api 失败: " + method + " " + uri.getPath(), e);
         } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
+            manager.close();
+        }
+    }
+
+    static JsonObject parseObject(String body) {
+        try {
+            JsonElement result = JsonParser.parseString(body);
+            if (!result.isJsonObject()) { throw new JsonSyntaxException("expected JSON object"); }
+            return result.getAsJsonObject();
+        } catch (JsonSyntaxException e) {
+            throw new K8sToolsException("解析 k8s api 响应失败: expected JSON object", e);
         }
     }
 
@@ -272,44 +419,32 @@ public class K8sApiClient {
         return namespace == null || namespace.trim().isEmpty() || "all".equalsIgnoreCase(namespace.trim());
     }
 
-    private static String readBody(InputStream in) throws IOException {
-        if (in == null) {
-            return "";
-        }
-        try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                bos.write(buf, 0, n);
-            }
-            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
-        } finally {
-            in.close();
-        }
-    }
-
     // ==================== TLS ====================
 
-    private static SSLSocketFactory buildSslSocketFactory(Builder b) {
+    private static SSLContext buildSslContext(Builder b) {
         try {
             SSLContext ctx = SSLContext.getInstance("TLS");
             if (b.insecureSkipTlsVerify) {
                 ctx.init(null, new TrustManager[]{TRUST_ALL_MANAGER}, null);
-                return ctx.getSocketFactory();
+                return ctx;
             }
             if (b.caCertPem != null && !b.caCertPem.trim().isEmpty()) {
-                X509Certificate ca = parsePemCertificate(b.caCertPem);
+                Collection<? extends Certificate> certificates = CertificateFactory.getInstance("X.509")
+                        .generateCertificates(new ByteArrayInputStream(b.caCertPem.getBytes(StandardCharsets.UTF_8)));
+                if (certificates.isEmpty()) { throw new GeneralSecurityException("CA bundle is empty"); }
                 KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
                 ks.load(null, null);
-                ks.setCertificateEntry("k8s-ca", ca);
+                int index = 0;
+                for (Certificate certificate : certificates) {
+                    ks.setCertificateEntry("k8s-ca-" + index++, certificate);
+                }
                 TrustManagerFactory tmf =
                         TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
                 tmf.init(ks);
                 ctx.init(null, tmf.getTrustManagers(), null);
-                return ctx.getSocketFactory();
+                return ctx;
             }
-            return null; // 使用 JVM 默认
+            return SSLContext.getDefault(); // 使用 JVM 默认
         } catch (GeneralSecurityException | IOException e) {
             throw new K8sToolsException("初始化 TLS 失败: " + e.getMessage(), e);
         }
@@ -358,7 +493,26 @@ public class K8sApiClient {
         while (u.endsWith("/")) {
             u = u.substring(0, u.length() - 1);
         }
+        try {
+            URI uri = new URI(u);
+            if (!("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
+                    || uri.getHost() == null || uri.getRawUserInfo() != null
+                    || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+                throw new IllegalArgumentException("apiServer must be an HTTP(S) URL without credentials, query or fragment");
+            }
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid apiServer URL", e);
+        }
         return u;
+    }
+
+    private static final class TlsSettings {
+        private final SSLContext context;
+        private final HostnameVerifier verifier;
+        private TlsSettings(SSLContext context, HostnameVerifier verifier) {
+            this.context = context;
+            this.verifier = verifier;
+        }
     }
 
     // ==================== Builder ====================
@@ -387,6 +541,12 @@ public class K8sApiClient {
             }
             if (token == null || token.trim().isEmpty()) {
                 throw new IllegalArgumentException("token is required");
+            }
+            if (token.indexOf('\r') >= 0 || token.indexOf('\n') >= 0) {
+                throw new IllegalArgumentException("token must not contain line breaks");
+            }
+            if (connectTimeoutMs < 0 || readTimeoutMs < 0) {
+                throw new IllegalArgumentException("timeouts must be >= 0");
             }
             return new K8sApiClient(this);
         }

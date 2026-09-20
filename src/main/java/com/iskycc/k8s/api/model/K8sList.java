@@ -1,5 +1,6 @@
 package com.iskycc.k8s.api.model;
 
+import com.google.gson.annotations.SerializedName;
 import java.util.Collections;
 import java.util.List;
 
@@ -22,7 +23,12 @@ public class K8sList<T> {
 
     public static class ListMeta {
         private String resourceVersion;
+        @SerializedName("continue")
+        private String continueToken;
+        private Long remainingItemCount;
 
         public String getResourceVersion() { return resourceVersion; }
+        public String getContinueToken() { return continueToken; }
+        public Long getRemainingItemCount() { return remainingItemCount; }
     }
 }

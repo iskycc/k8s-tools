@@ -1,10 +1,10 @@
 # k8s-tools
 
-一个兼容 Java 8 的 Kubernetes 数据查询工具，既可通过命令行运行，也可作为 Java 库使用。
+一个兼容 Java 8 的 Kubernetes 工具库，提供通用资源增删查改 API，并保留通过命令行查询集群的入口。
 
-通过 SSH 登录控制平面节点（master），创建或复用 ServiceAccount、读取 Secret 中的 token、发现 API Server 地址并获取 CA；随后使用 Bearer Token 调用 Kubernetes API，查询版本、Node、Namespace、Pod、Service 和 Deployment。
+通过 SSH 登录控制平面节点（master），创建或复用 ServiceAccount、读取 Secret 中的 token、发现 API Server 地址并获取 CA；随后使用 Bearer Token 调用 Kubernetes API。Java 库支持内置资源和 CRD 的通用 REST 操作、选择器、分页、Patch、Apply 和子资源；CLI 查询版本、Node、Namespace、Pod、Service 和 Deployment。已有 API 凭据时可直接调用 Java API，无需 SSH。
 
-**接入集群会修改资源**：默认使用 `kube-system/k8s-tools` ServiceAccount，并创建指向 `cluster-admin` 的 ClusterRoleBinding；已有 ServiceAccount 无法读取 token 时，默认删除后重建。TLS 校验失败时默认自动降级。接入前请阅读[默认行为与配置](#默认行为与配置)及[真实集群接入限制](#真实集群接入限制)。
+**SSH 凭据初始化会修改资源**：默认使用 `kube-system/k8s-tools` ServiceAccount，并创建指向 `cluster-admin` 的 ClusterRoleBinding；已有 ServiceAccount 无法读取 token 时，默认删除后重建。读取请求的 TLS 校验失败时默认自动降级。接入前请阅读[默认行为与配置](#默认行为与配置)及[真实集群接入限制](#真实集群接入限制)。
 
 ## 项目结构与调用链
 
@@ -14,6 +14,7 @@ flowchart LR
     Fetcher -->|SshExecutor / SSH| Master[master 上的 kubectl]
     Fetcher --> Info[MasterInfo: 地址、token、CA]
     Info --> Client[K8sApiClient]
+    Credentials[API 地址 / Token / CA] --> Client
     Client -->|HTTPS / Bearer Token| API[Kubernetes API Server]
 ```
 
@@ -21,14 +22,15 @@ flowchart LR
 | --- | --- |
 | [Main.java](src/main/java/com/iskycc/k8s/Main.java) | 解析命令行参数，依次获取凭据、构建客户端、打印资源摘要 |
 | [ssh/](src/main/java/com/iskycc/k8s/ssh/) | `SshConfig` 配置连接；`SshExecutor` 执行远程命令；`ServiceTokenFetcher` 编排凭据获取；`MasterInfo` 保存结果 |
-| [api/K8sApiClient.java](src/main/java/com/iskycc/k8s/api/K8sApiClient.java) | 基于 JDK `HttpURLConnection` / `HttpsURLConnection` 的 GET 客户端，负责认证、TLS 和 JSON 解析 |
+| [api/K8sApiClient.java](src/main/java/com/iskycc/k8s/api/K8sApiClient.java) | 公共入口、HTTP 请求、认证、TLS、Discovery 和兼容的 POJO 查询 |
+| [api/K8sResourceClient.java](src/main/java/com/iskycc/k8s/api/K8sResourceClient.java) | 完整 JSON 资源 CRUD、分页、Patch/Apply、删除参数和子资源 |
 | [api/model/](src/main/java/com/iskycc/k8s/api/model/) | Gson 映射的资源模型，只包含当前查询所需的部分字段 |
 | [K8sToolsException.java](src/main/java/com/iskycc/k8s/K8sToolsException.java) | 统一运行时异常；`K8sApiException` 额外提供 HTTP 状态码与响应体 |
 | [src/test/java/](src/test/java/) | JUnit 4 单元测试、模拟 SSH/HTTPS 服务及端到端测试 |
 | [pom.xml](pom.xml) | 单模块 Maven 构建、依赖与插件配置 |
 | [AGENTS.md](AGENTS.md) | 仓库维护和编码协作指南 |
 
-主要依赖为 Apache MINA SSHD（SSH）和 Gson（JSON）；运行时使用 SLF4J NOP 实现。JUnit 4、Bouncy Castle 仅用于测试。版本以 `pom.xml` 为准。
+主要依赖为 Apache MINA SSHD（SSH）、Apache HttpClient 5（HTTP/PATCH）和 Gson（JSON）；CLI 使用 SLF4J NOP，NOP 声明为 optional，不强制传递给库的使用者。JUnit 4、Bouncy Castle 仅用于测试。版本以 `pom.xml` 为准。
 
 项目采用 [Apache License 2.0](LICENSE)。
 
@@ -38,7 +40,9 @@ flowchart LR
 
 首次使用需要确认 Central Portal 中的 `io.github.iskycc` 命名空间已验证，并配置 Central Portal token 与 GPG 密钥。配置步骤、Secrets 名称、版本规则和本地验证命令见 [Maven Central 发布指南](docs/publishing.md)。
 
-`1.0.0` 已发布到 [Maven Central](https://repo.maven.apache.org/maven2/io/github/iskycc/k8s-tools/1.0.0/)，其他 Maven 项目可直接引用以下依赖，无需添加额外仓库：
+**当前开发版为 `1.1.0-SNAPSHOT`，新增 CRUD API 尚未发布为正式版。** 快照使用方式见[快照仓库配置](docs/publishing.md#发布与使用快照)，也可运行 `mvn clean install` 安装到本地。完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。
+
+旧版 `1.0.0`（只读查询）已发布到 [Maven Central](https://repo.maven.apache.org/maven2/io/github/iskycc/k8s-tools/1.0.0/)，其他 Maven 项目可直接引用以下依赖，无需添加额外仓库：
 
 ```xml
 <dependency>
@@ -64,11 +68,11 @@ mvn test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 检查命令行入口，不连接集群
-java -cp 'target/k8s-tools-1.0.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
-产物为 `target/k8s-tools-1.0.0-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
+产物为 `target/k8s-tools-1.1.0-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
 
 ## 命令行使用
 
@@ -77,12 +81,12 @@ java -cp 'target/k8s-tools-1.0.0-SNAPSHOT.jar:target/dependency/*' \
 1. 运行工具的机器能够连接目标 SSH 端口，也能够直接访问 API Server。工具不会建立 SSH 隧道；自动发现的集群内网地址未必能从本机访问，可用 `--api-server` 覆盖。
 2. 远端 SSH 用户的非交互 shell 能执行 `kubectl`、`awk` 和 `cat`。`kubectl` 当前配置需要具备管理 ServiceAccount、Secret、ClusterRoleBinding 及授予目标角色的权限。
 3. 默认尝试读取远端 `/etc/kubernetes/pki/ca.crt`；API 地址发现失败时会读取 `/etc/kubernetes/admin.conf`。后者仅用于提取地址，**不会**自动作为所有 `kubectl` 命令的 `--kubeconfig`。
-4. 当前新建 token Secret 的流程有[已知接入限制](#真实集群接入限制)。首次接入需先准备可复用的 ServiceAccount 和 token Secret。
+4. 新建 token Secret 会携带必需的 SA 注解并等待控制器填充；也可预先准备资源供工具复用。环境要求与验证边界见[真实集群接入限制](#真实集群接入限制)。
 
 ### 运行示例
 
 ```bash
-java -cp 'target/k8s-tools-1.0.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.1.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --user root --key "$HOME/.ssh/id_rsa" \
   --namespace default
@@ -133,7 +137,20 @@ client.listDeployments("default").forEach(System.out::println);
 
 `fetch()` 无论成功或失败都会关闭 SSH 连接。直接使用 `SshExecutor` 时由调用方关闭，它不支持并发共享会话。`K8sApiClient` 每次请求结束都会断开 HTTP 连接，无需单独关闭客户端。
 
-`listPods`、`listServices`、`listDeployments` 接受 `null`、空白字符串或 `all`（忽略大小写）表示所有命名空间。`getRaw("/api/v1/nodes")` 可获取其他 API 路径的原始响应文本，路径必须以 `/` 开头。当前客户端只提供 GET，不提供资源写入、watch 或自动分页。
+`listPods`、`listServices`、`listDeployments` 接受 `null`、空白字符串或 `all`（忽略大小写）表示所有命名空间。这些旧方法返回字段子集，适合摘要查询；需要完整资源与写入操作时使用新的资源入口：
+
+```java
+// 通用 CRUD 入口，完整 JSON 保留未知字段。
+com.iskycc.k8s.api.K8sResourceClient deployments = client.deployments("default");
+com.google.gson.JsonObject current = deployments.get("web");
+current.getAsJsonObject("spec").addProperty("replicas", 3);
+deployments.replace("web", current); // 保留 GET 得到的 metadata.resourceVersion
+
+// 或直接使用 scale 子资源。
+deployments.scale("web", 3);
+```
+
+创建、删除、Patch、Apply、CRD、分页和参数说明见 [Java API 指南](docs/library-api.md)。`getRaw(path)` 获取原始文本，`request(...)` 返回 HTTP 状态、正文及响应头。当前不支持 watch 或其他流式/协议升级操作。
 
 如果已有 API 地址和 token，可直接使用 `K8sApiClient.builder().apiServer(...).token(...).build()`，无需经过 SSH。TLS 默认值见下文。
 
@@ -146,7 +163,7 @@ client.listDeployments("default").forEach(System.out::println);
 1. SSH 连接后检查 SA，不存在则尝试创建。
 2. 若 SA 已存在，先读取 `.secrets[0].name` 指向的 Secret，再尝试配置的手动 Secret，读取 `.data.token` 并在本地 Base64 解码。
 3. 若已有 SA 仍无法读取 token，默认删除 SA、尝试删除手动 Secret，再重建 SA；设置 `recreateSaWhenTokenUnobtainable(false)` 时直接抛出异常。
-4. 新建或重建后，当前实现先创建 `kubernetes.io/service-account-token` Secret，再添加 SA 注解，最后轮询 token。该创建顺序的限制见[真实集群接入限制](#真实集群接入限制)。
+4. 新建或重建后，一次提交带有 `kubernetes.io/service-account.name` 注解的完整 Secret JSON；遇到 AlreadyExists 时补齐注解，最后轮询 token。
 5. 确保 ClusterRoleBinding 存在，然后发现 API 地址、读取 CA，并返回 `MasterInfo`。
 
 这里使用的是保存在 Secret 中的长期 token，代码没有调用 TokenRequest 或实现自动续期。长期 token 不代表永远可用：删除 SA 会触发关联 token Secret 清理，旧的自动生成 token 还可能因长期未使用而被失效、清理。参见 [Kubernetes ServiceAccount 管理文档](https://kubernetes.io/docs/reference/access-authn-authz/service-accounts-admin/#auto-generated-legacy-serviceaccount-token-clean-up)。
@@ -178,7 +195,7 @@ ServiceTokenFetcher.Options options = new ServiceTokenFetcher.Options()
 MasterInfo info = new ServiceTokenFetcher(ssh, options).fetch();
 ```
 
-关闭重建后，已有 SA 的 token 不可读会直接失败，不会转为仅创建 Secret。绑定已存在时，当前实现不核对或修正其角色与主体。配置项中的资源名、路径会拼接到远端 shell 命令，仅应传入可信配置。
+关闭重建后，已有 SA 的 token 不可读会直接失败，不会转为仅创建 Secret。绑定已存在时，当前实现不核对或修正其角色与主体。资源名与重试参数会在连接前校验，远端文件路径要求绝对路径并进行 shell 引号转义。
 
 ### API 地址发现
 
@@ -198,13 +215,13 @@ HTTPS 的实际校验方式取决于客户端构造方式：
 
 | 构造方式 | 初始校验 | TLS 失败后的行为 |
 | --- | --- | --- |
-| `fromMasterInfo(info)`，有 CA | 集群 CA 与主机名校验 | 默认降级，跳过校验重试一次 |
+| `fromMasterInfo(info)`，有 CA | 集群 CA 与主机名校验 | GET/HEAD 默认降级重试一次；写入不触发降级 |
 | `fromMasterInfo(info)`，无 CA | 直接跳过证书与主机名校验 | 无需自动降级 |
-| `builder()`，未设置 CA | JVM 默认信任库与主机名校验 | 默认降级，跳过校验重试一次 |
+| `builder()`，未设置 CA | JVM 默认信任库与主机名校验 | GET/HEAD 默认降级重试一次；写入不触发降级 |
 | `insecureSkipTlsVerify(true)` / CLI `--insecure` | 直接跳过证书与主机名校验 | 无需自动降级 |
-| `insecureSkipTlsVerify(false)` 且 `tlsAutoFallback(false)` | 提供的 CA 或 JVM 默认信任库 | 抛出异常，不降级 |
+| `insecureSkipTlsVerify(false)` 且 `tlsAutoFallback(false)` | 提供的 CA bundle 或 JVM 默认信任库 | 抛出异常，不降级 |
 
-自动降级后，该客户端后续请求也会跳过校验；`isDegradedToInsecure()` 只表示是否发生过自动降级，不表示所有跳过校验的情况。`fromMasterInfo(info, false)` 仅关闭“无 CA 时直接跳过”，仍保留自动降级。CA 内容无法解析导致的构建失败不会触发请求重试。
+自动降级仅由 GET/HEAD 触发；写请求遇到 TLS 错误直接失败，不降级或重放。自动降级后，该客户端后续请求（包括写入）也会跳过校验；`isDegradedToInsecure()` 只表示是否发生过自动降级，不表示所有跳过校验的情况。`fromMasterInfo(info, false)` 仅关闭“无 CA 时直接跳过”，仍保留自动降级。CA 内容无法解析导致的构建失败不会触发请求重试。
 
 需要严格校验时，显式使用 Builder：
 
@@ -222,9 +239,9 @@ API 连接超时默认为 `10000` 毫秒，读取超时为 `30000` 毫秒，可�
 
 ## 真实集群接入限制
 
-当前代码采用“先创建 token Secret、再添加 SA 注解”的两条命令。Kubernetes 在创建该类型 Secret 时就要求 `kubernetes.io/service-account.name` 注解，因此新建流程会遇到校验失败；模拟 SSH 服务未实现这项校验。此结论来自对本项目命令与 [Kubernetes v1.28.2 校验代码](https://github.com/kubernetes/kubernetes/blob/v1.28.2/pkg/apis/core/validation/validation.go#L5638-L5658) 的核对，尚未在真实集群复现。
+`1.1.0-SNAPSHOT` 已修正旧版 `1.0.0` 的 token Secret 创建顺序：创建请求中即包含 SA 注解，模拟器也增加了对应校验。真实集群仍需启用相关 token controller，并允许 SSH 用户创建 SA、Secret 和权限绑定；本项目的模拟测试不代表已经验证真实集群的 RBAC、准入策略或全部 Kubernetes 版本。
 
-在代码修正前，可按 [Kubernetes 官方长期 token 创建方式](https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#manually-create-a-long-lived-api-token-for-a-serviceaccount)，由集群管理员预先准备专用 SA 和带注解的 Secret。以下清单对应本工具的默认名称：
+也可按 [Kubernetes 官方长期 token 创建方式](https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#manually-create-a-long-lived-api-token-for-a-serviceaccount)，由管理员预先准备专用 SA 和带注解的 Secret。以下清单对应默认名称：
 
 ```yaml
 apiVersion: v1
@@ -250,6 +267,7 @@ type: kubernetes.io/service-account-token
 ```bash
 # 按改动范围运行对应测试
 mvn -Dtest=K8sApiClientTest test
+mvn -Dtest=K8sResourceClientTest test
 mvn -Dtest=K8sToolsE2ETest test
 mvn -Dtest=MainDemoTest test
 ```
@@ -257,6 +275,7 @@ mvn -Dtest=MainDemoTest test
 | 测试类 | 覆盖内容 |
 | --- | --- |
 | `K8sApiClientTest` | 参数校验、URL 规范化、API 路径校验、MasterInfo 字段映射与 token 掩码 |
+| `K8sResourceClientTest` | HTTP CRUD、完整 JSON、三种 Patch、Apply、分页、CRD Discovery、删除选项、子资源、冲突/权限/网络错误及写入不重放 |
 | `K8sToolsE2ETest` | 新建与复用 Secret、SA 重建及禁用重建、token 轮询、地址发现回退、资源查询、TLS 降级与严格模式、SSH 认证失败、HTTP 401/404 |
 | `MainDemoTest` | CLI 对模拟集群执行完整流程，校验输出且不泄露完整 token |
 
@@ -267,10 +286,10 @@ mvn -Dtest=MainDemoTest test
 | `NoClassDefFoundError` | 确认已复制运行时依赖，且 classpath 包含 `target/dependency/*` |
 | SSH 连接失败 | 检查主机、端口、认证方式、私钥路径与格式；有口令的私钥通过 Java Builder 配置 |
 | `kubectl` 无配置或无权限 | 检查远端 SSH 用户的 PATH、当前 kubeconfig 及资源管理权限 |
-| 创建 token Secret 时提示缺少注解 | 参照上面的真实集群接入限制，预先创建带 SA 注解的 Secret |
+| 创建 token Secret 时提示缺少注解 | 确认使用包含修复的版本；旧版 `1.0.0` 可预先创建带 SA 注解的 Secret |
 | 等待 token 超时 | 检查 SA、Secret 注解与 token controller，再评估重试次数及间隔 |
 | API 连接超时 | 检查发现的地址是否可从运行工具的机器访问，必要时设置 `--api-server` |
 | HTTP 401 / 403 | 分别检查 token 是否有效、绑定的角色与主体是否符合查询权限需求 |
 | 严格 TLS 模式连接失败 | 检查 CA、证书有效期、访问地址与证书主机名是否匹配 |
 
-`K8sApiException.getStatusCode()` 返回 HTTP 状态码；网络或 TLS 请求错误为 `-1`。HTTP 错误正文可通过 `getResponseBody()` 获取。
+`K8sApiException.getStatusCode()` 返回 HTTP 状态码；网络或 TLS 请求错误为 `-1`。HTTP 错误正文可通过 `getResponseBody()` 获取；`getReason()` 和 `getStatusMessage()` 提供 Kubernetes Status 字段。默认异常消息不包含正文。

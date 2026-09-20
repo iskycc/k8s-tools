@@ -6,13 +6,13 @@
 
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.1.0-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <name>k8s-tools</name>
   <description>
-    JDK8 工具：通过 SSH 登录 k8s master 节点获取 service account token，
-    再使用该 token 调用 k8s API 获取集群数据（附完整 E2E 模拟测试）。
+    Java 8 Kubernetes 工具库：通用资源 CRUD、Patch/Apply、Discovery、分页和子资源，
+    支持直接 Bearer Token 或 SSH 获取凭据，附本地 HTTPS/SSH 模拟测试。
   </description>
   <url>https://github.com/iskycc/k8s-tools</url>
 
@@ -48,21 +48,29 @@
     <sshd.version>2.12.1</sshd.version>
     <bouncycastle.version>1.78.1</bouncycastle.version>
     <slf4j.version>1.7.36</slf4j.version>
+    <httpclient.version>5.6.4</httpclient.version>
   </properties>
 
   <dependencies>
+    <!-- Java 8 原生 HttpURLConnection 不支持 PATCH；使用 HttpClient 执行真实 HTTP 方法。 -->
+    <dependency>
+      <groupId>org.apache.httpcomponents.client5</groupId>
+      <artifactId>httpclient5</artifactId>
+      <version>${httpclient.version}</version>
+    </dependency>
     <!-- SSH 客户端(Apache MINA SSHD)：登录 master 节点执行 kubectl 获取 service token -->
     <dependency>
       <groupId>org.apache.sshd</groupId>
       <artifactId>sshd-core</artifactId>
       <version>${sshd.version}</version>
     </dependency>
-    <!-- SSHD 依赖 slf4j-api；工具 jar 使用 NOP 实现保持静默 -->
+    <!-- 本项目 CLI 保持静默；optional 避免作为库时强制下游使用 NOP 日志实现。 -->
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-nop</artifactId>
       <version>${slf4j.version}</version>
       <scope>runtime</scope>
+      <optional>true</optional>
     </dependency>
 
     <!-- JSON 解析 k8s API 响应 -->
@@ -129,6 +137,84 @@
   </build>
 
   <profiles>
+    <!-- 快照使用标准 Maven 仓库协议；只有显式激活才允许上传。 -->
+    <profile>
+      <id>snapshot</id>
+      <distributionManagement>
+        <snapshotRepository>
+          <id>central</id>
+          <name>Central Portal Snapshots</name>
+          <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+        </snapshotRepository>
+      </distributionManagement>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-enforcer-plugin</artifactId>
+            <version>3.6.3</version>
+            <executions>
+              <execution>
+                <id>require-snapshot-version</id>
+                <goals><goal>enforce</goal></goals>
+                <configuration>
+                  <rules>
+                    <requireProperty>
+                      <property>project.version</property>
+                      <regex>(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-SNAPSHOT</regex>
+                      <regexMessage>快照发布必须使用 X.Y.Z-SNAPSHOT 版本。</regexMessage>
+                    </requireProperty>
+                  </rules>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <version>3.4.0</version>
+            <executions>
+              <execution>
+                <id>attach-sources</id>
+                <goals><goal>jar-no-fork</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <version>3.12.0</version>
+            <executions>
+              <execution>
+                <id>attach-javadocs</id>
+                <goals><goal>jar</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.2.8</version>
+            <configuration>
+              <bestPractices>true</bestPractices>
+              <passphraseEnvName>MAVEN_GPG_PASSPHRASE</passphraseEnvName>
+            </configuration>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals><goal>sign</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-deploy-plugin</artifactId>
+            <version>3.1.4</version>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
     <!-- 仅显式发布时生成附属产物、签名并启用 Central Portal 部署。 -->
     <profile>
       <id>release</id>

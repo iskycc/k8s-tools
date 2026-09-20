@@ -1,5 +1,7 @@
 package com.iskycc.k8s.mock;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.ExitCallback;
 import org.apache.sshd.server.SshServer;
@@ -64,6 +66,11 @@ public class MockK8sMasterServer implements Closeable {
             Collections.synchronizedList(new ArrayList<String>());
     private final Map<String, AtomicInteger> secretTokenReads =
             Collections.synchronizedMap(new HashMap<String, AtomicInteger>());
+    private volatile JsonObject createdSecretManifest;
+
+    public JsonObject getCreatedSecretManifest() {
+        return createdSecretManifest == null ? null : createdSecretManifest.deepCopy();
+    }
 
     private SshServer sshd;
     private Path hostKeyFile;
@@ -158,6 +165,28 @@ public class MockK8sMasterServer implements Closeable {
         // ---------- 永久 token Secret ----------
         if (c.startsWith("kubectl -n kube-system create secret generic ")
                 && c.contains("--type=kubernetes.io/service-account-token")) {
+            return new Response(1, "", "Secret is invalid: metadata.annotations[kubernetes.io/service-account.name]: Required value\n");
+        }
+        if (c.startsWith("printf '%s' '") && c.endsWith("' | kubectl -n kube-system create -f -")) {
+            String document = c.substring("printf '%s' '".length(),
+                    c.length() - "' | kubectl -n kube-system create -f -".length());
+            JsonObject manifest;
+            try {
+                manifest = JsonParser.parseString(document).getAsJsonObject();
+                JsonObject metadata = manifest.getAsJsonObject("metadata");
+                if (!"Secret".equals(manifest.get("kind").getAsString())
+                        || !"v1".equals(manifest.get("apiVersion").getAsString())
+                        || !"kubernetes.io/service-account-token".equals(manifest.get("type").getAsString())
+                        || !MANUAL_SECRET_NAME.equals(metadata.get("name").getAsString())
+                        || !"kube-system".equals(metadata.get("namespace").getAsString())
+                        || !SA_NAME.equals(metadata.getAsJsonObject("annotations")
+                                .get("kubernetes.io/service-account.name").getAsString())) {
+                    return new Response(1, "", "Secret manifest is invalid\n");
+                }
+            } catch (RuntimeException e) {
+                return new Response(1, "", "Secret manifest is missing required fields\n");
+            }
+            createdSecretManifest = manifest;
             if (scenario == SaScenario.BROKEN_SA) {
                 return new Response(1, "", "Error from server (AlreadyExists): secrets \""
                         + MANUAL_SECRET_NAME + "\" already exists\n");
@@ -187,7 +216,7 @@ public class MockK8sMasterServer implements Closeable {
         }
 
         // ---------- CA ----------
-        if (c.startsWith("cat /etc/kubernetes/pki/ca.crt")) {
+        if (c.equals("cat -- '/etc/kubernetes/pki/ca.crt'")) {
             return Response.ok(caCertPem);
         }
         return new Response(127, "", "bash: " + c + ": command not found\n");

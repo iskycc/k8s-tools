@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpsServer;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import java.io.Closeable;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -14,6 +15,13 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.net.URLDecoder;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,6 +51,62 @@ public class MockK8sApiServer implements Closeable {
 
     private final AtomicInteger requestCount = new AtomicInteger();
     private final AtomicReference<String> lastAuthorization = new AtomicReference<String>();
+    private final ConcurrentLinkedQueue<Reply> replies = new ConcurrentLinkedQueue<Reply>();
+    private final List<RecordedRequest> requests = Collections.synchronizedList(new ArrayList<RecordedRequest>());
+
+    /** 为协议测试提供按顺序返回的响应；无预设时仍使用原有只读 fixture。 */
+    public void enqueueResponse(int code, String body) {
+        enqueueResponse(code, body, Collections.<String, String>emptyMap());
+    }
+
+    public void enqueueResponse(int code, String body, Map<String, String> headers) {
+        replies.add(new Reply(code, body, new LinkedHashMap<String, String>(headers)));
+    }
+
+    /** 模拟服务端在收到请求后断开连接，用于验证写请求不被自动重放。 */
+    public void enqueueDisconnect() { replies.add(new Reply(-1, "", Collections.<String, String>emptyMap())); }
+
+    public List<RecordedRequest> getRequests() {
+        synchronized (requests) { return new ArrayList<RecordedRequest>(requests); }
+    }
+
+    public static final class RecordedRequest {
+        public final String method;
+        public final String path;
+        public final String rawQuery;
+        public final Map<String, String> query;
+        public final String body;
+        public final String contentType;
+
+        private RecordedRequest(HttpExchange exchange) throws IOException {
+            method = exchange.getRequestMethod();
+            path = exchange.getRequestURI().getPath();
+            rawQuery = exchange.getRequestURI().getRawQuery();
+            query = new LinkedHashMap<String, String>();
+            if (rawQuery != null) {
+                for (String item : rawQuery.split("&")) {
+                    String[] parts = item.split("=", 2);
+                    query.put(URLDecoder.decode(parts[0], "UTF-8"),
+                            parts.length == 1 ? "" : URLDecoder.decode(parts[1], "UTF-8"));
+                }
+            }
+            contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] bytes = new byte[4096];
+            int count;
+            while ((count = exchange.getRequestBody().read(bytes)) != -1) { output.write(bytes, 0, count); }
+            body = new String(output.toByteArray(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static final class Reply {
+        private final int code;
+        private final String body;
+        private final Map<String, String> headers;
+        private Reply(int code, String body, Map<String, String> headers) {
+            this.code = code; this.body = body; this.headers = headers;
+        }
+    }
 
     public MockK8sApiServer(String expectedToken) throws Exception {
         this.expectedToken = expectedToken;
@@ -93,8 +157,18 @@ public class MockK8sApiServer implements Closeable {
         String auth = ex.getRequestHeaders().getFirst("Authorization");
         lastAuthorization.set(auth);
         try {
+            requests.add(new RecordedRequest(ex));
             if (!("Bearer " + expectedToken).equals(auth)) {
                 send(ex, 401, statusJson(401, "Unauthorized"));
+                return;
+            }
+            Reply reply = replies.poll();
+            if (reply != null) {
+                if (reply.code == -1) { return; }
+                for (Map.Entry<String, String> header : reply.headers.entrySet()) {
+                    ex.getResponseHeaders().set(header.getKey(), header.getValue());
+                }
+                send(ex, reply.code, reply.body);
                 return;
             }
             String path = ex.getRequestURI().getPath();
@@ -130,6 +204,10 @@ public class MockK8sApiServer implements Closeable {
     }
 
     private static void send(HttpExchange ex, int code, String body) throws IOException {
+        if (code == 204 || "HEAD".equals(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(code, -1);
+            return;
+        }
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().add("Content-Type", "application/json");
         ex.sendResponseHeaders(code, bytes.length);
