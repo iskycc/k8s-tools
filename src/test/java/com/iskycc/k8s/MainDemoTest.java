@@ -2,6 +2,7 @@ package com.iskycc.k8s;
 
 import com.iskycc.k8s.mock.MockK8sApiServer;
 import com.iskycc.k8s.mock.MockK8sMasterServer;
+import com.iskycc.k8s.mock.MockRedisServer;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -53,6 +54,26 @@ public class MainDemoTest {
     }
 
     @Test
+    public void redisCacheSurvivesRepeatedCliRunsAndCanBeRefreshed() throws Exception {
+        try (MockRedisServer redis = new MockRedisServer()) {
+            String url = "redis://127.0.0.1:" + redis.getPort() + "/0";
+            assertMainFlow("--redis-url", url);
+            int commands = master.getExecutedCommands().size();
+            assertEquals(TOKEN, redis.get("127.0.0.1ServiceToken"));
+            assertEquals(apiServer.getBaseUrl(), redis.get("127.0.0.1ApiServerUrl"));
+            assertMainFlow("--redis-url", url);
+            assertEquals(commands, master.getExecutedCommands().size());
+            assertMainFlow("--redis-url", url, "--refresh-cache");
+            assertTrue(master.getExecutedCommands().size() > commands);
+        }
+    }
+
+    @Test
+    public void strictTlsRemainsAvailable() throws Exception {
+        assertMainFlow("--strict-tls");
+    }
+
+    @Test
     public void passwordOnlyIgnoresCliKeyAndRunsFullFlow() throws Exception {
         Path directory = Files.createTempDirectory("k8s-cli-missing-key-");
         try {
@@ -95,6 +116,10 @@ public class MainDemoTest {
         String help = new String(output.toByteArray(), StandardCharsets.UTF_8);
         assertTrue(help.contains("--password-only"));
         assertTrue(help.contains("SSH agent"));
+        assertTrue(help.contains("--redis-url"));
+        assertTrue(help.contains("--refresh-cache"));
+        assertTrue(help.contains("--strict-tls"));
+        assertTrue(help.contains("默认开启"));
     }
 
     private void assertMainFlow(String... additionalArgs) throws Exception {
@@ -103,6 +128,7 @@ public class MainDemoTest {
                 "--port", String.valueOf(master.getPort()),
                 "--user", "root",
                 "--password", "demo-password",
+                "--redis-url", "", // 测试默认不继承真实环境的 Redis 配置。
                 "--namespace", "default"));
         args.addAll(Arrays.asList(additionalArgs));
         ByteArrayOutputStream buf = new ByteArrayOutputStream();

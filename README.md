@@ -4,13 +4,14 @@
 
 通过 SSH 登录控制平面节点（master），创建或复用 ServiceAccount、读取 Secret 中的 token、发现 API Server 地址并获取 CA；随后使用 Bearer Token 调用 Kubernetes API。Java 库支持内置资源和 CRD 的通用 REST 操作、选择器、分页、Patch、Apply 和子资源；CLI 查询版本、Node、Namespace、Pod、Service 和 Deployment。已有 API 凭据时可直接调用 Java API，无需 SSH。
 
-**SSH 凭据初始化会修改资源**：默认使用 `kube-system/k8s-tools` ServiceAccount，并创建指向 `cluster-admin` 的 ClusterRoleBinding；已有 ServiceAccount 无法读取 token 时，默认删除后重建。读取请求的 TLS 校验失败时默认自动降级。接入前请阅读[默认行为与配置](#默认行为与配置)及[真实集群接入限制](#真实集群接入限制)。
+**SSH 凭据初始化会修改资源**：默认使用 `kube-system/k8s-tools` ServiceAccount，并创建指向 `cluster-admin` 的 ClusterRoleBinding；已有 ServiceAccount 无法读取 token 时，默认删除后重建。CLI 和新增 `fromSsh` 入口默认跳过 TLS 证书及主机名校验；原有 Builder/fromMasterInfo 的读请求仍保留自动降级策略。接入前请阅读[默认行为与配置](#默认行为与配置)及[真实集群接入限制](#真实集群接入限制)。
 
 作为依赖接入时，按以下顺序阅读：
 
 1. [Maven 坐标与接入配置](docs/maven-usage.md)：正式版/快照版、完整 POM、依赖排查。
 2. [可运行的查询示例](docs/examples/K8sReadExample.java)：使用已有 token 与 CA 查询 Pod，兼容 Java 8。
-3. [Java API 使用指南](docs/library-api.md)：连接、CRUD、Deployment/Service、分页、CRD、子资源和错误处理。
+3. [Redis 凭据缓存与自动接入](docs/redis-cache.md)：缓存 token/API 地址、删除刷新、免手工配置 API 与证书（从 `1.3.0` 起提供）。
+4. [Java API 使用指南](docs/library-api.md)：连接、CRUD、Deployment/Service、分页、CRD、子资源和错误处理。
 
 ## 项目结构与调用链
 
@@ -46,12 +47,15 @@ flowchart LR
 
 ## 开源组件与依赖范围
 
-下表对应 `1.2.1` 的依赖配置及当前源码的 [pom.xml](pom.xml)。**`1.2.1` 将 SSHD 升级为 `2.19.0`；已有的 `1.2.0` 仍使用 `2.12.1`。** 源码开发构建版本为 `1.2.1-SNAPSHOT`，正式发布由工作流转换为 `1.2.1`。
+下表对应当前源码的 [pom.xml](pom.xml)。`1.3.0` 新增 Jedis 缓存功能及 Redis 运行依赖；正式版 `1.2.1` 不包含这些新增内容。**`1.2.1` 将 SSHD 升级为 `2.19.0`；已有的 `1.2.0` 仍使用 `2.12.1`。** 源码开发构建版本为 `1.3.0-SNAPSHOT`，正式发布由工作流转换为 `1.3.0`。
 
-运行和测试依赖按 **2026-09-20** 的 Maven Central 版本元数据及上游 Java 要求核对，选用支持 Java 8 的最新稳定版，不选择 alpha、beta、RC、milestone 或 SNAPSHOT。依据和版本选择见[依赖版本核对](docs/dependency-versions.md)。依赖固定为具体版本，后续升级需重新核对并运行 Java 8 测试。
+运行和测试依赖按 **2026-09-20** 的 Maven Central 版本元数据及上游 Java 要求核对，除按接入要求固定的 Jedis `5.2.0` 外，选用支持 Java 8 的最新稳定版，不选择 alpha、beta、RC、milestone 或 SNAPSHOT。依据和版本选择见[依赖版本核对](docs/dependency-versions.md)。依赖固定为具体版本，后续升级需重新核对并运行 Java 8 测试。
 
 | 开源组件 / Maven 坐标 | 版本 | 用途 | 范围与传递行为 | 许可证 |
 | --- | --- | --- | --- | --- |
+| [Jedis](https://github.com/redis/jedis/tree/v5.2.0)：`redis.clients:jedis` | `5.2.0` | Redis 凭据缓存 | 直接 `compile` 依赖，版本按接入要求固定 | MIT |
+| [Apache Commons Pool](https://commons.apache.org/proper/commons-pool/)：`org.apache.commons:commons-pool2` | `2.13.1` | Jedis 连接池 | Jedis 必需组件，直接声明统一下游版本 | Apache-2.0 |
+| [JSON-java](https://github.com/stleary/JSON-java)：`org.json:json` | `20260814` | Jedis 的 JSON 命令 API 类型支持 | Jedis 所需类型，直接声明统一下游版本 | Public Domain |
 | [Apache MINA SSHD](https://mina.apache.org/sshd-project/)：`org.apache.sshd:sshd-core` | `2.19.0` | SSH 客户端、密码/私钥认证、远程执行命令 | 直接 `compile` 依赖，传递给使用方 | Apache-2.0 |
 | Apache MINA SSHD：`org.apache.sshd:sshd-common` | `2.19.0` | SSH 协议、密钥解析等公共能力 | 由 sshd-core 传递 | Apache-2.0 |
 | [Apache HttpClient](https://hc.apache.org/httpcomponents-client-5.6.x/)：`org.apache.httpcomponents.client5:httpclient5` | `5.6.4` | Kubernetes HTTP/TLS 请求及 PATCH | 直接 `compile` 依赖，传递给使用方 | Apache-2.0 |
@@ -89,15 +93,15 @@ Maven 编译、测试、打包、源码/Javadoc、GPG 和 Central 发布插件�
 
 仅仓库维护者发布版本时需要验证 Central Portal 命名空间并配置发布 token 与 GPG 密钥。使用公开依赖无需这些凭据；接入步骤见 [Maven 配置指南](docs/maven-usage.md)，发布操作见 [Maven Central 发布指南](docs/publishing.md)。
 
-**`1.2.1` 更新 Java 8 兼容依赖并精简传递依赖，保留 `1.2.0` 的仅密码 SSH 模式及 `1.1.0` 的通用资源 CRUD API。** 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.2.1-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
+**`1.3.0` 新增 Redis 凭据缓存、显式删除刷新和 `fromSsh` 自动接入，CLI 默认跳过 TLS 证书与主机名校验，可用 `--strict-tls` 开启严格校验。** 保留已有仅密码 SSH 模式及通用资源 CRUD API。 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.3.0-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
 
-其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.2.1/) 下载。旧版 `1.0.0` 只提供查询接口。
+其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.3.0/) 下载。旧版 `1.0.0` 只提供查询接口。
 
 ```xml
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.2.1</version>
+  <version>1.3.0</version>
 </dependency>
 ```
 
@@ -117,11 +121,11 @@ mvn test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 检查命令行入口，不连接集群
-java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
-产物为 `target/k8s-tools-1.2.1-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
+产物为 `target/k8s-tools-1.3.0-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
 
 ## 命令行使用
 
@@ -135,7 +139,7 @@ java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
 ### 运行示例
 
 ```bash
-java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --user root --key "$HOME/.ssh/id_rsa" \
   --namespace default
@@ -146,7 +150,7 @@ java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
 只使用密码登录机器、忽略本地 SSH 私钥及用户密钥签名认证：
 
 ```bash
-java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --port 22 --user root \
   --password '<SSH密码>' --password-only \
@@ -165,12 +169,17 @@ java -cp 'target/k8s-tools-1.2.1-SNAPSHOT.jar:target/dependency/*' \
 | `--key <path>` | 无 | 本地私钥路径；同时提供密码时，CLI 优先使用私钥，除非指定 `--password-only` |
 | `--namespace <ns>` | `default` | Pod、Service、Deployment 的查询范围；`all` 表示所有命名空间 |
 | `--api-server <url>` | 自动发现 | 覆盖 API Server 地址，例如 `https://192.0.2.10:6443` |
-| `--insecure` | 未显式开启 | 直接跳过证书和主机名校验；未传此项时仍默认允许 TLS 自动降级 |
+| `--insecure` | 默认开启 | 直接跳过证书和主机名校验 |
+| `--strict-tls` | 未开启 | 使用 CA 或 JVM 信任库严格校验，禁止自动降级 |
+| `--redis-url <url>` | `K8S_TOOLS_REDIS_URL` 环境变量 | Redis 地址；未设置则不缓存 |
+| `--refresh-cache` | 未开启 | 删除当前 master 缓存后通过 SSH 重新获取，需配置 Redis |
 | `-h` / `--help` | — | 打印帮助并退出 |
 
-`--namespace` 不改变凭据所用 ServiceAccount 的命名空间，后者默认始终为 `kube-system`。CLI 没有配置 SA/RBAC、关闭自动重建、关闭 TLS 自动降级或传入私钥口令的参数，这些设置需通过 Java API 完成。
+`--namespace` 不改变凭据所用 ServiceAccount 的命名空间，后者默认始终为 `kube-system`。CLI 没有配置 SA/RBAC、关闭自动重建或传入私钥口令的参数，这些设置需通过 Java API 完成。
 
 ## Java 库用法
+
+`1.3.0` 新增 `K8sApiClient.fromSsh(sshConfig, options)`：自动发现 API 地址、直接忽略自签名证书；配置 `options.redisCache(new RedisServiceTokenCache(jedisPool))` 后缓存命中不再连接 SSH。用法及失效刷新见 [Redis 接入指南](docs/redis-cache.md)。使用这些接口请引用 `1.3.0` 或更新版本。
 
 以下代码片段展示默认获取流程，前提同上：
 
@@ -220,13 +229,13 @@ deployments.scale("web", 3);
 
 ### ServiceAccount 与 token
 
-`ServiceTokenFetcher.fetch()` 的执行顺序如下：
+配置 Redis 后先读取缓存，完整且配置匹配时直接返回；只有未命中或未配置 Redis 才执行以下流程：
 
 1. SSH 连接后检查 SA，不存在则尝试创建。
 2. 若 SA 已存在，先读取 `.secrets[0].name` 指向的 Secret，再尝试配置的手动 Secret，读取 `.data.token` 并在本地 Base64 解码。
 3. 若已有 SA 仍无法读取 token，默认删除 SA、尝试删除手动 Secret，再重建 SA；设置 `recreateSaWhenTokenUnobtainable(false)` 时直接抛出异常。
 4. 新建或重建后，一次提交带有 `kubernetes.io/service-account.name` 注解的完整 Secret JSON；遇到 AlreadyExists 时补齐注解，最后轮询 token。
-5. 确保 ClusterRoleBinding 存在，然后发现 API 地址、读取 CA，并返回 `MasterInfo`。
+5. 确保 ClusterRoleBinding 存在，然后发现 API 地址、读取 CA；配置 Redis 时原子写入 token、地址和元数据，再返回 `MasterInfo`。
 
 这里使用的是保存在 Secret 中的长期 token，代码没有调用 TokenRequest 或实现自动续期。长期 token 不代表永远可用：删除 SA 会触发关联 token Secret 清理，旧的自动生成 token 还可能因长期未使用而被失效、清理。参见 [Kubernetes ServiceAccount 管理文档](https://kubernetes.io/docs/reference/access-authn-authz/service-accounts-admin/#auto-generated-legacy-serviceaccount-token-clean-up)。
 
@@ -247,13 +256,13 @@ deployments.scale("web", 3);
 | `kubeConfigPath` | `/etc/kubernetes/admin.conf` | 地址发现的备用配置文件 |
 | `caCertPath` | `/etc/kubernetes/pki/ca.crt` | 远端 CA 文件 |
 | `fetchCaCert` | `true` | 是否尝试读取 CA |
+| `redisCache` | 无 | `RedisServiceTokenCache`；优先读缓存，未命中才 SSH 获取 |
 
 例如保留已有 SA、禁止自动删除重建：
 
 ```java
 ServiceTokenFetcher.Options options = new ServiceTokenFetcher.Options()
-        .recreateSaWhenTokenUnobtainable(false)
-        .apiServerOverride("https://192.0.2.10:6443");
+        .recreateSaWhenTokenUnobtainable(false);
 MasterInfo info = new ServiceTokenFetcher(ssh, options).fetch();
 ```
 
@@ -266,6 +275,8 @@ MasterInfo info = new ServiceTokenFetcher(ssh, options).fetch();
 1. `kubectl config view --minify -o jsonpath={.clusters[0].cluster.server}`。
 2. 从 `kubeConfigPath` 中用 `awk` 提取首个 `server:` 地址。
 3. 回退为 `https://<SSH主机>:6443`。
+
+发现结果格式无效时继续下一来源；回环/通配地址会替换为 SSH 主机，保留原端口，IPv6 地址自动带方括号。显式 override 不改写；未配置 Redis 时每次发现，缓存命中直接使用缓存地址，地址变化可调用 `refresh()`。
 
 CA 读取失败时返回的 `MasterInfo.caCertPem` 为 `null`，不会终止凭据获取流程。
 
@@ -281,6 +292,8 @@ HTTPS 的实际校验方式取决于客户端构造方式：
 
 | 构造方式 | 初始校验 | TLS 失败后的行为 |
 | --- | --- | --- |
+| `fromSsh(...)` / CLI 默认模式 | 直接跳过证书与主机名校验 | 首次写请求同样适用，无需自动降级 |
+| CLI `--strict-tls` | 提供的 CA 或 JVM 默认信任库 | 抛出异常，不降级 |
 | `fromMasterInfo(info)`，有 CA | 集群 CA 与主机名校验 | GET/HEAD 默认降级重试一次；写入不触发降级 |
 | `fromMasterInfo(info)`，无 CA | 直接跳过证书与主机名校验 | 无需自动降级 |
 | `builder()`，未设置 CA | JVM 默认信任库与主机名校验 | GET/HEAD 默认降级重试一次；写入不触发降级 |

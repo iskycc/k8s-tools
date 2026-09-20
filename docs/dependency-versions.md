@@ -1,13 +1,16 @@
 # Java 8 依赖版本核对
 
-核对日期：2026-09-20。本页对应 `1.2.1` 的依赖配置；已有的 `1.2.0` POM 不会被覆盖。
+核对日期：2026-09-20。本页对应 `1.3.0` 的依赖配置；已有正式版的 POM 不会被覆盖。
 
-版本策略是选择**支持 Java 8 的最新稳定版本**。先读取 Maven Central 的完整版本列表，排除预发布版本，再核对上游最低运行 JDK、实际 jar 基础字节码和本项目在 JDK 8 下的测试。不能直接采用元数据的 `latest` / `release` 字段，因为这些字段可能指向 alpha 或 milestone。
+版本策略是选择**支持 Java 8 的最新稳定版本**；Jedis 按接入要求固定为 `5.2.0`，不随此策略升级。先读取 Maven Central 的完整版本列表，排除预发布版本，再核对上游最低运行 JDK、实际 jar 基础字节码和本项目在 JDK 8 下的测试。不能直接采用元数据的 `latest` / `release` 字段，因为这些字段可能指向 alpha 或 milestone。
 
 ## 运行与测试依赖
 
 | 组件 | 本次选择 | 选择依据 |
 | --- | --- | --- |
+| Jedis | `5.2.0` | 按接入要求固定；[上游 POM](https://github.com/redis/jedis/blob/v5.2.0/pom.xml)使用 Java 8 编译 |
+| Commons Pool | `2.13.1` | [Central 版本列表](https://repo.maven.apache.org/maven2/org/apache/commons/commons-pool2/maven-metadata.xml)的最新稳定版；[POM](https://repo.maven.apache.org/maven2/org/apache/commons/commons-pool2/2.13.1/commons-pool2-2.13.1.pom)要求 Java 8，直接声明，统一 Jedis 的下游版本 |
+| JSON-java | `20260814` | [Central 版本列表](https://repo.maven.apache.org/maven2/org/json/json/maven-metadata.xml)的最新稳定版；[POM](https://repo.maven.apache.org/maven2/org/json/json/20260814/json-20260814.pom)指定 Java 8，直接声明 Jedis JSON API 所需类型，统一下游版本 |
 | SSHD core / common | `2.19.0` | [Central 版本列表](https://repo.maven.apache.org/maven2/org/apache/sshd/sshd-core/maven-metadata.xml)中的最新 2.x 稳定版；3.0.0-M5 为里程碑版。[上游 2.19.0 说明](https://github.com/apache/mina-sshd/blob/sshd-2.19.0/README.md#core-requirements)要求运行时 Java 8+，构建 SSHD 本身需 Java 17+，两者不同 |
 | Gson | `2.14.0` | [Central 版本列表](https://repo.maven.apache.org/maven2/com/google/code/gson/gson/maven-metadata.xml)中的最新稳定版；[上游要求](https://google.github.io/gson/#minimum-java-version)从 2.12.0 起最低为 Java 8 |
 | SLF4J API / NOP | `2.0.19` | [上游发布记录](https://www.slf4j.org/news.html)说明 2.0.x 要求 Java 8；[版本列表](https://repo.maven.apache.org/maven2/org/slf4j/slf4j-api/maven-metadata.xml)中的 2.1.0-alpha1 不作为稳定版使用 |
@@ -22,6 +25,7 @@
 ## 依赖隔离与兼容性
 
 - SSHD 的 `jcl-over-slf4j` 未被当前实现使用，继续排除。
+- Jedis 的 Gson 路径排除，由本项目直接提供同一 Gson；避免另一条路径把静态分析注解重新传递给使用方。
 - Gson 的 `error_prone_annotations` 是静态分析注解，其 [JPMS 声明](https://github.com/google/gson/blob/gson-parent-2.14.0/gson/src/main/java/module-info.java)为 `requires static`；JSON 运行不需要它，继续保持使用方 classpath 精简。
 - 直接声明 `slf4j-api:2.0.19`，避免上游依赖声明使解析结果退回 1.7.x；NOP 使用相同版本且保持 optional。使用方可通过自身 dependencyManagement 选择版本，但需自行负责兼容性。
 - SLF4J 2.x 的日志 provider 采用 ServiceLoader；升级时需同步使用方日志实现，不能把旧 1.7 binding 当作 2.x provider。详情见 [SLF4J FAQ](https://www.slf4j.org/faq.html#compatibility)。

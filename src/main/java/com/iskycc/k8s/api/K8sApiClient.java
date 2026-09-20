@@ -16,6 +16,8 @@ import com.iskycc.k8s.api.model.Pod;
 import com.iskycc.k8s.api.model.Service;
 import com.iskycc.k8s.api.model.VersionInfo;
 import com.iskycc.k8s.ssh.MasterInfo;
+import com.iskycc.k8s.ssh.ServiceTokenFetcher;
+import com.iskycc.k8s.ssh.SshConfig;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
@@ -108,6 +110,18 @@ public class K8sApiClient {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    /** 自动发现 API 地址并直接跳过证书及主机名校验，首次写请求同样适用。 */
+    public static K8sApiClient fromSsh(SshConfig config) {
+        return fromSsh(config, new ServiceTokenFetcher.Options());
+    }
+
+    /** 配置 Redis 后优先复用缓存；未命中才连接 SSH。直接跳过 TLS 校验。 */
+    public static K8sApiClient fromSsh(SshConfig config, ServiceTokenFetcher.Options options) {
+        MasterInfo info = new ServiceTokenFetcher(config, options).fetch();
+        return builder().apiServer(info.getApiServerUrl()).token(info.getToken())
+                .insecureSkipTlsVerify(true).build();
     }
 
     /**

@@ -8,8 +8,13 @@ import com.iskycc.k8s.api.model.Pod;
 import com.iskycc.k8s.api.model.Service;
 import com.iskycc.k8s.api.model.VersionInfo;
 import com.iskycc.k8s.ssh.MasterInfo;
+import com.iskycc.k8s.ssh.RedisServiceTokenCache;
 import com.iskycc.k8s.ssh.ServiceTokenFetcher;
 import com.iskycc.k8s.ssh.SshConfig;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.exceptions.JedisException;
+
+import java.net.URI;
 
 /**
  * 命令行演示入口：SSH 登录 master 获取 token，然后调用 k8s API 输出集群数据。
@@ -32,7 +37,9 @@ public final class Main {
         boolean passwordOnly = false;
         String namespace = "default";
         String apiServerOverride = null;
-        boolean insecure = false;
+        boolean insecure = true;
+        String redisUrl = System.getenv("K8S_TOOLS_REDIS_URL");
+        boolean refreshCache = false;
 
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
@@ -64,6 +71,15 @@ public final class Main {
                 case "--insecure":
                     insecure = true;
                     break;
+                case "--strict-tls":
+                    insecure = false;
+                    break;
+                case "--redis-url":
+                    redisUrl = next(args, ++i, a);
+                    break;
+                case "--refresh-cache":
+                    refreshCache = true;
+                    break;
                 case "-h":
                 case "--help":
                     usage();
@@ -85,7 +101,13 @@ public final class Main {
             return;
         }
 
-        try {
+        if (refreshCache && (redisUrl == null || redisUrl.trim().isEmpty())) {
+            System.err.println("--refresh-cache 需要 --redis-url 或 K8S_TOOLS_REDIS_URL");
+            System.exit(2);
+            return;
+        }
+
+        try (JedisPool redisPool = createRedisPool(redisUrl)) {
             SshConfig.Builder sshBuilder = SshConfig.builder()
                     .host(host).port(port).username(user);
             if (passwordOnly) {
@@ -99,12 +121,17 @@ public final class Main {
                 System.exit(2);
             }
 
-            System.out.println("[1/3] SSH 登录 master 节点 " + user + "@" + host + ":" + port + " 获取 service token ...");
+            System.out.println("[1/3] 获取 service token：" + host
+                    + (redisPool == null ? "，通过 SSH" : "，优先 Redis 缓存") + " ...");
             ServiceTokenFetcher.Options options = new ServiceTokenFetcher.Options();
+            if (redisPool != null) {
+                options.redisCache(new RedisServiceTokenCache(redisPool));
+            }
             if (apiServerOverride != null) {
                 options.apiServerOverride(apiServerOverride);
             }
-            MasterInfo info = new ServiceTokenFetcher(sshBuilder.build(), options).fetch();
+            ServiceTokenFetcher fetcher = new ServiceTokenFetcher(sshBuilder.build(), options);
+            MasterInfo info = refreshCache ? fetcher.refresh() : fetcher.fetch();
             System.out.println("      完成: " + info);
 
             K8sApiClient client = insecure
@@ -113,12 +140,11 @@ public final class Main {
                             .token(info.getToken())
                             .insecureSkipTlsVerify(true)
                             .build()
-                    : K8sApiClient.fromMasterInfo(info);
+                    : K8sApiClient.builder().apiServer(info.getApiServerUrl()).token(info.getToken())
+                            .caCertPem(info.getCaCertPem()).insecureSkipTlsVerify(false)
+                            .tlsAutoFallback(false).build();
             System.out.println("[2/3] 构建 K8sApiClient (TLS: "
-                    + (insecure ? "跳过证书校验"
-                        : (info.getCaCertPem() != null
-                            ? "集群 CA 校验，失败自动忽略自签名"
-                            : "无 CA，忽略自签名证书")) + ")");
+                    + (insecure ? "跳过证书及主机名校验" : "严格校验，不自动降级") + ")");
 
             System.out.println("[3/3] 调用 k8s API 获取数据 ...");
             VersionInfo version = client.getVersion();
@@ -158,7 +184,20 @@ public final class Main {
         } catch (K8sToolsException e) {
             System.err.println("执行失败: " + e.getMessage());
             System.exit(1);
+        } catch (JedisException | IllegalArgumentException e) {
+            // 不回显可能含用户名和密码的 Redis URI。
+            System.err.println("配置或 Redis 连接失败，请检查参数及 Redis 服务");
+            System.exit(2);
         }
+    }
+
+    private static JedisPool createRedisPool(String redisUrl) {
+        if (redisUrl == null || redisUrl.trim().isEmpty()) { return null; }
+        URI uri = URI.create(redisUrl.trim());
+        if (!("redis".equals(uri.getScheme()) || "rediss".equals(uri.getScheme())) || uri.getHost() == null) {
+            throw new IllegalArgumentException("Redis URL must use redis:// or rediss://");
+        }
+        return new JedisPool(uri);
     }
 
     private static String next(String[] args, int i, String flag) {
@@ -178,6 +217,9 @@ public final class Main {
         System.out.println("  --key <path>        SSH 私钥路径(同时传密码时优先，--password-only 除外)");
         System.out.println("  --namespace <ns>    查询的命名空间, 默认 default");
         System.out.println("  --api-server <url>  覆盖自动发现的 API Server 地址");
-        System.out.println("  --insecure          直接跳过 TLS 证书校验(默认: CA 校验失败时自动忽略自签名)");
+        System.out.println("  --insecure          跳过证书及主机名校验(默认开启，适用于自签名集群)");
+        System.out.println("  --strict-tls        使用发现的 CA 或 JVM 信任库严格校验，不自动降级");
+        System.out.println("  --redis-url <url>   Redis 地址，也可用 K8S_TOOLS_REDIS_URL；缓存命中不连接 SSH");
+        System.out.println("  --refresh-cache     删除当前 master 的缓存并重新通过 SSH 获取");
     }
 }

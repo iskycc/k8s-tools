@@ -4,6 +4,8 @@ import com.iskycc.k8s.K8sToolsException;
 import com.google.gson.JsonObject;
 
 import java.io.Closeable;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
@@ -59,22 +61,47 @@ public class ServiceTokenFetcher implements Closeable {
     }
 
     /**
-     * 执行完整获取流程：SSH 连接 -> 确保 SA(存在但拿不到 token 则删除重建)
+     * 配置 Redis 时优先返回完整且配置匹配的缓存；未命中时执行：
+     * SSH 连接 -> 确保 SA(存在但拿不到 token 则删除重建)
      * -> 获取永久 token -> 确保 RBAC 绑定 -> 自动发现 API 地址 -> 获取 CA。
      */
     public MasterInfo fetch() {
         try {
             options.validate();
+            if (options.redisCache != null) {
+                MasterInfo cached = options.redisCache.load(sshConfig.getHost(), options.cacheContext());
+                if (cached != null) {
+                    return cached;
+                }
+            }
             ssh.connect();
             boolean saExisted = ensureServiceAccount();
             String token = fetchPermanentToken(saExisted);
             ensureClusterRoleBinding();
             String apiServer = fetchApiServerUrl();
             String caPem = options.fetchCaCert ? fetchCaCert() : null;
-            return new MasterInfo(apiServer, token, caPem,
+            MasterInfo info = new MasterInfo(apiServer, token, caPem,
                     options.serviceAccount, options.serviceAccountNamespace);
+            if (options.redisCache != null) {
+                options.redisCache.save(sshConfig.getHost(), options.cacheContext(), info);
+            }
+            return info;
         } finally {
             close();
+        }
+    }
+
+    /** 删除 Redis 中的旧凭据后重新通过 SSH 获取；不会重放此前的 API 请求。 */
+    public MasterInfo refresh() {
+        options.validate();
+        invalidateCache();
+        return fetch();
+    }
+
+    /** 仅删除当前 master 的缓存；未配置 Redis 时不做任何操作。 */
+    public void invalidateCache() {
+        if (options.redisCache != null) {
+            options.redisCache.invalidate(sshConfig.getHost());
         }
     }
 
@@ -266,19 +293,52 @@ public class ServiceTokenFetcher implements Closeable {
         // 1) 当前 kubeconfig
         ExecResult r = ssh.exec("kubectl config view --minify"
                 + " -o jsonpath={.clusters[0].cluster.server}", options.commandTimeoutMs);
-        String url = r.getStdout().trim();
-        if (r.isSuccess() && !url.isEmpty()) {
+        String url = normalizeDiscoveredUrl(r.getStdout());
+        if (r.isSuccess() && url != null) {
             return url;
         }
         // 2) master 上的 admin.conf
         ExecResult conf = ssh.exec("awk '/server:/{print $2; exit}' " + shellQuote(options.kubeConfigPath),
                 options.commandTimeoutMs);
-        url = conf.getStdout().trim();
-        if (conf.isSuccess() && !url.isEmpty()) {
+        url = normalizeDiscoveredUrl(conf.getStdout());
+        if (conf.isSuccess() && url != null) {
             return url;
         }
         // 3) 兜底：按 master 默认 6443 端口推断
-        return "https://" + sshConfig.getHost() + ":6443";
+        return urlForHost("https", sshConfig.getHost().trim(), 6443);
+    }
+
+    static boolean isValidApiServerUrl(String value) {
+        if (value == null || value.trim().isEmpty()) { return false; }
+        try {
+            URI uri = new URI(value.trim());
+            return ("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))
+                    && uri.getHost() != null && uri.getRawUserInfo() == null
+                    && uri.getRawQuery() == null && uri.getRawFragment() == null
+                    && (uri.getRawPath() == null || uri.getRawPath().isEmpty() || "/".equals(uri.getRawPath()))
+                    && (uri.getPort() == -1 || uri.getPort() > 0 && uri.getPort() <= 65535);
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+    private String normalizeDiscoveredUrl(String value) {
+        if (!isValidApiServerUrl(value)) { return null; }
+        URI uri = URI.create(value.trim());
+        String host = uri.getHost();
+        if ("localhost".equalsIgnoreCase(host) || host.matches("127\\.[0-9]+\\.[0-9]+\\.[0-9]+")
+                || "0.0.0.0".equals(host) || "[::1]".equals(host) || "[::]".equals(host)) {
+            return urlForHost(uri.getScheme(), sshConfig.getHost().trim(), uri.getPort());
+        }
+        return value.trim();
+    }
+
+    private static String urlForHost(String scheme, String host, int port) {
+        try {
+            return new URI(scheme, null, host, port, null, null, null).toString();
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("SSH host cannot be used as an API address", e);
+        }
     }
 
     private String fetchCaCert() {
@@ -324,8 +384,13 @@ public class ServiceTokenFetcher implements Closeable {
         private String caCertPath = "/etc/kubernetes/pki/ca.crt";
         private boolean fetchCaCert = true;
         private int commandTimeoutMs = 30000;
+        private RedisServiceTokenCache redisCache;
 
         private void validate() {
+            if (apiServerOverride != null && !apiServerOverride.trim().isEmpty()
+                    && !isValidApiServerUrl(apiServerOverride)) {
+                throw new IllegalArgumentException("apiServerOverride must be a valid HTTP(S) server URL");
+            }
             requireResourceName(serviceAccount, "serviceAccount", false);
             if (serviceAccountNamespace == null || serviceAccountNamespace.length() > 63
                     || !serviceAccountNamespace.matches("[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")) {
@@ -342,6 +407,20 @@ public class ServiceTokenFetcher implements Closeable {
                     || caCertPath == null || !caCertPath.startsWith("/")) {
                 throw new IllegalArgumentException("kubeConfigPath and caCertPath must be absolute remote paths");
             }
+        }
+
+        private String cacheContext() {
+            JsonObject context = new JsonObject();
+            context.addProperty("serviceAccount", serviceAccount);
+            context.addProperty("namespace", serviceAccountNamespace);
+            context.addProperty("role", clusterRole);
+            context.addProperty("binding", clusterRoleBindingName == null ? serviceAccount : clusterRoleBindingName);
+            context.addProperty("secret", permanentTokenSecretName == null ? serviceAccount + "-token" : permanentTokenSecretName);
+            context.addProperty("apiServerOverride", apiServerOverride == null ? "" : apiServerOverride.trim());
+            context.addProperty("kubeConfigPath", kubeConfigPath);
+            context.addProperty("caCertPath", caCertPath);
+            context.addProperty("fetchCaCert", fetchCaCert);
+            return context.toString();
         }
 
         private static void requireResourceName(String value, String option, boolean rbac) {
@@ -364,5 +443,7 @@ public class ServiceTokenFetcher implements Closeable {
         public Options caCertPath(String v) { this.caCertPath = v; return this; }
         public Options fetchCaCert(boolean v) { this.fetchCaCert = v; return this; }
         public Options commandTimeoutMs(int v) { this.commandTimeoutMs = v; return this; }
+        /** 配置后优先读缓存，未命中才通过 SSH 获取；连接池仍由调用方关闭。 */
+        public Options redisCache(RedisServiceTokenCache v) { this.redisCache = v; return this; }
     }
 }

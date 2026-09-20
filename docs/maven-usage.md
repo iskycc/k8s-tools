@@ -8,14 +8,14 @@
 | --- | --- |
 | groupId | `io.github.iskycc` |
 | artifactId | `k8s-tools` |
-| 正式版本 | `1.2.1`，更新 Java 8 兼容依赖；包含仅密码 SSH 模式及通用 CRUD、Discovery、分页和子资源接口 |
+| 正式版本 | `1.3.0`，新增 Redis 凭据缓存、显式刷新和 SSH 自动接入；包含通用 CRUD、Discovery、分页和子资源接口 |
 | 历史快照 | `1.1.0-SNAPSHOT`，需要额外仓库，不含 1.2.0 的 SSH 改动 |
-| 当前源码开发版本 | `1.2.1-SNAPSHOT`，本次不发布该快照，可从源码安装到本地 |
+| 当前源码开发版本 | `1.3.0-SNAPSHOT`，本次不发布该快照，可从源码安装到本地 |
 | Java 包名 | `com.iskycc.k8s`，与 Maven groupId 不同 |
 | 使用环境 | JDK 8+、Maven 3.6.3+ |
 | 依赖类型 | 普通 jar，默认 `compile` scope，无需 classifier |
 
-本次正式版坐标为 `1.2.1`，发布完成后可下载；需要试用快照时再切换版本与仓库。旧版 `1.0.0` 只有查询接口，不能编译本指南中的通用 CRUD 调用。
+本次正式版坐标为 `1.3.0`，发布完成后可下载；需要试用快照时再切换版本与仓库。旧版 `1.0.0` 只有查询接口，不能编译本指南中的通用 CRUD 调用。
 
 ## 现有项目添加正式版依赖
 
@@ -25,7 +25,7 @@
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.2.1</version>
+  <version>1.3.0</version>
 </dependency>
 ```
 
@@ -54,7 +54,7 @@
     <dependency>
       <groupId>io.github.iskycc</groupId>
       <artifactId>k8s-tools</artifactId>
-      <version>1.2.1</version>
+      <version>1.3.0</version>
     </dependency>
   </dependencies>
 
@@ -100,7 +100,7 @@ Windows 的 classpath 使用 `;` 分隔并用双引号包裹。示例的环境�
 
 ## 使用快照版本
 
-以下以历史快照 `1.1.0-SNAPSHOT` 为例，它不包含 `1.2.0` 的仅密码 SSH 模式。当前源码为 `1.2.1-SNAPSHOT`，本次只发布正式版，不上传新快照。使用历史快照时将依赖版本改为 `1.1.0-SNAPSHOT`，并在使用方 POM 的 `<project>` 下增加与 `<dependencies>` 同级的 `<repositories>`：
+以下以历史快照 `1.1.0-SNAPSHOT` 为例，它不包含 `1.2.0` 的仅密码 SSH 模式。当前源码为 `1.3.0-SNAPSHOT`，本次只发布正式版，不上传新快照。使用历史快照时将依赖版本改为 `1.1.0-SNAPSHOT`，并在使用方 POM 的 `<project>` 下增加与 `<dependencies>` 同级的 `<repositories>`：
 
 ```xml
 <repositories>
@@ -129,11 +129,13 @@ Windows 的 classpath 使用 `;` 分隔并用双引号包裹。示例的环境�
 
 ## 依赖、日志与打包
 
-- 完整组件版本、许可证及打包范围见 [README 开源组件清单](../README.md#开源组件与依赖范围)。`1.2.1` 使用 SSHD `2.19.0` 并排除 `jcl-over-slf4j`；已有的 `1.2.0` 仍使用 SSHD `2.12.1`。
+`1.3.0` 新增 Jedis `5.2.0`、Commons Pool `2.13.1` 和 JSON-java `20260814`，用于 [Redis 凭据缓存](redis-cache.md)；已有正式版 `1.2.1` 的依赖不变。
+
+- 完整组件版本、许可证及打包范围见 [README 开源组件清单](../README.md#开源组件与依赖范围)。从 `1.2.1` 起使用 SSHD `2.19.0` 并排除 `jcl-over-slf4j`；已有的 `1.2.0` 仍使用 SSHD `2.12.1`。
 - Maven 会带入 Gson、Apache HttpClient 5、Apache MINA SSHD 等运行依赖；不要只复制 k8s-tools 的单个 jar 运行。
 - 本文示例使用传递依赖中的 Gson JSON 类型。若业务代码直接大量使用 Gson，可以按项目的版本管理规则显式声明 Gson；不要随意覆盖为与本库不兼容的旧版本。
 - `slf4j-nop` 是 optional，不会强制传递给使用方。项目已有日志实现时沿用现有配置，避免同时放入多个日志绑定；没有日志实现时可能看到 SLF4J 提示。
-- `1.2.1` 采用 SLF4J `2.0.19`，需搭配兼容 2.x 的日志 provider；已发布的 `1.2.0` 仍为 1.7.x。升级本库时同时核对业务项目的日志实现，不能只替换 API jar 而保留旧的 1.7 binding。
+- 从 `1.2.1` 起采用 SLF4J `2.0.19`，需搭配兼容 2.x 的日志 provider；已发布的 `1.2.0` 仍为 1.7.x。升级本库时同时核对业务项目的日志实现，不能只替换 API jar 而保留旧的 1.7 binding。
 - `sources` 和 `javadoc` 是 IDE 查看源码/文档的附件，不要将其作为业务依赖的 classifier。
 - 自己的可执行 jar 是否包含依赖由使用方的打包方式决定；上面的示例通过 `target/dependency/*` 提供运行时依赖。
 - JUnit、Hamcrest、Bouncy Castle 仅为本库测试使用，不向下游传递；本库的主 jar、sources 和 Javadoc 不包含测试代码或模拟服务。POM 中的 `test` 声明不等于发布了这些测试依赖。
@@ -157,11 +159,12 @@ mvn dependency:resolve -Dclassifier=javadoc -DincludeGroupIds=io.github.iskycc
 | 现象 | 检查与处理 |
 | --- | --- |
 | 找不到 `com.iskycc.k8s` | 确认依赖在实际模块的 `<dependencies>` 中，scope 不是 `test`，然后重新加载 Maven 项目 |
-| 找不到 `resource`、`configMaps` 等方法 | 查看依赖树是否仍选中了 `1.0.0`；将坐标版本设为 `1.2.1` |
+| 找不到 `resource`、`configMaps` 等方法 | 查看依赖树是否仍选中了 `1.0.0`；将坐标版本设为 `1.3.0` |
+| 找不到 `fromSsh`、`redisCache`、`refresh` 方法 | 这些方法从 `1.3.0` 起提供，检查依赖树是否仍使用 `1.2.1` 或旧快照 |
 | 找不到 `passwordOnly` 方法 | 该方法从 `1.2.0` 起提供，检查依赖树是否仍使用 `1.1.0` 或旧快照 |
 | 无法解析 `1.1.0-SNAPSHOT` | 确认快照仓库及 `<snapshots>` 已启用，检查镜像设置，再使用 `-U` |
 | `NoClassDefFoundError` | 运行时 classpath 缺少依赖；重新执行 copy-dependencies 或检查应用打包配置 |
 | `NoSuchMethodError` | 查看依赖树，核对 Gson/HttpClient 等是否被其他依赖或 BOM 覆盖 |
 | TLS 错误、401、403 | 依赖已加载，问题位于集群连接或权限；按 [API 错误处理指南](library-api.md#错误与兼容性)排查 |
 
-仓库当前 `pom.xml` 中的 `1.2.1-SNAPSHOT` 是源码开发构建版本，正式版坐标为 `1.2.1`。本指南不需要修改本仓库 POM 或运行任何发布命令。
+仓库当前 `pom.xml` 中的 `1.3.0-SNAPSHOT` 是源码开发构建版本，正式版坐标为 `1.3.0`。本指南不需要修改本仓库 POM 或运行任何发布命令。
