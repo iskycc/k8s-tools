@@ -5,7 +5,7 @@
 ## 项目定位与入口
 
 - 项目是单模块 Maven Java 库与 CLI，坐标为 `io.github.iskycc:k8s-tools`，目标运行时为 Java 8。Maven `groupId` 与 Java 包名独立，现有 Java 包名为 `com.iskycc.k8s`。
-- 主链路：`Main` → `ServiceTokenFetcher` → `SshExecutor` 执行远端 `kubectl` → `MasterInfo` → `K8sApiClient` 发起 Bearer Token REST 请求；已有 API 凭据可直接构造客户端。
+- 主链路：`Main` → `K8sApiClient.Builder.fromSsh` → `ServiceTokenFetcher` → `SshExecutor` 执行远端 `kubectl` → `MasterInfo` → `K8sApiClient` 发起 Bearer Token REST 请求；已有 API 凭据可直接构造客户端。
 - `src/main/java/com/iskycc/k8s/ssh/` 负责 SSH 配置、命令执行、凭据获取和 Redis 缓存；`api/` 负责 HTTP/TLS、异常、Discovery、通用资源 CRUD 和分页；`api/model/` 放置 Gson 资源模型。
 - `src/test/java/com/iskycc/k8s/mock/` 提供模拟 SSH master、HTTPS API Server 和测试证书。模拟服务不运行真实 `kubectl`。
 - 依赖、插件和编译设置以 `pom.xml` 为准；新增 Jedis 按用户要求固定为 5.2.0；Commons Pool 与 JSON-java 直接声明以统一下游版本，单靠本库 dependencyManagement 不会传递版本约束。当前使用 Apache MINA SSHD 2.19.0、Apache HttpClient 5（Java 8 下的 PATCH 支持）、Gson、JUnit 4。排除 SSHD 引入但未使用的 jcl-over-slf4j；保留必需的 SLF4J API。SLF4J NOP 为 optional，不强制传递给库的使用者。JUnit、Hamcrest、Bouncy Castle 仅为测试依赖。
@@ -28,7 +28,7 @@ mvn -Dtest=MainDemoTest test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 无集群的 CLI 启动检查
-java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
@@ -52,10 +52,10 @@ java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
 - 已有 SA 依次尝试自动 Secret 和手动 Secret；均无法读取 token 时默认删除并重建 SA。关闭 `recreateSaWhenTokenUnobtainable` 后直接抛异常。重试数表示首次读取之后的次数。
 - 已存在的 ClusterRoleBinding 不会校验或修正角色和主体；不要把“存在”描述成“权限已验证”。
 - 新建 token Secret 必须提交带 SA 注解的完整 JSON；AlreadyExists 时补注解。mock 会拒绝缺少注解的旧创建命令，并检查清单字段，不能弱化校验。
-- Redis 缓存通过 `Options.redisCache(RedisServiceTokenCache)` 启用，连接池由调用方管理。key 为 `host + ServiceToken`、`host + ApiServerUrl`，额外 `host + ServiceTokenMetadata` 保存配置归属与 CA，全部 String、无 TTL；MGET/MSET 保证同批读写，单实例 Redis，不支持 Cluster 跨槽。命中不连接 SSH；不完整、损坏或配置变化时重新获取。`invalidateCache()` 只删缓存，`refresh()` 先删除后 SSH 获取；不自动重放业务请求。Redis 失败必须显式抛错，不能静默绕过。
+- 当前源码的 Redis 接入优先使用 `K8sApiClient.builder().redisUrl(...).refreshCache(...).fromSsh(ssh[, options])`，连接池在初始化内创建并可靠关闭，返回的客户端无需 close；未配置 URL 不启用缓存，刷新必须有 URL。Builder 不修改传入 Options，自建缓存优先于旧 Options 外部缓存；原外部池不关闭。新 Builder 入口从 1.5.0 起提供，1.3.0 不包含。旧 `Options.redisCache(RedisServiceTokenCache)` 保留兼容，外部连接池由调用方管理。key 为 `host + ServiceToken`、`host + ApiServerUrl`，额外 `host + ServiceTokenMetadata` 保存配置归属与 CA，全部 String、无 TTL；MGET/MSET 保证同批读写，单实例 Redis，不支持 Cluster 跨槽。命中不连接 SSH；不完整、损坏或配置变化时重新获取。`invalidateCache()` 只删缓存，`refresh()` 先删除后 SSH 获取；不自动重放业务请求。Redis 失败必须显式抛错，不能静默绕过。
 - API 地址发现顺序为显式覆盖 → 当前 kubeconfig → `admin.conf` → SSH 主机的 `6443` 端口。自动发现的非法 URL 继续下一来源，回环/通配地址替换为 SSH 主机并保留端口；IPv6 fallback 必须合法，显式覆盖不改写。`kubeConfigPath` 只用于提取地址，不控制所有远端 `kubectl` 的配置。
 - `fromMasterInfo` 无 CA 时默认直接跳过 TLS 校验；Builder 未提供 CA 时初始使用 JVM 信任库。两者的 GET/HEAD 默认允许 TLS 失败后自动降级，降级对同一客户端后续请求（含写入）持续生效；写请求自身不触发自动降级或重放。
-- 新增 `K8sApiClient.fromSsh` 和 CLI 默认直接跳过证书与主机名校验（含首次写入）；CLI `--strict-tls` 显式关闭跳过和自动降级。Redis、fromSsh 和 CLI 新行为从 1.3.0 起提供，不在正式版 1.2.1 中。
+- `K8sApiClient.fromSsh`、新 `Builder.fromSsh` 和 CLI 默认直接跳过证书与主机名校验（含首次写入）；Builder 的 fromSsh 允许显式 TLS 设置，严格模式需同时关闭跳过和自动降级，不改变原 Builder.build 的默认值。CLI `--strict-tls` 显式关闭跳过和自动降级。Redis、静态 fromSsh 和 CLI 默认跳过 TLS 的行为从 1.3.0 起提供；Builder 托管 Redis 接入从 1.5.0 起提供。
 - 严格 TLS 需要同时保持 `insecureSkipTlsVerify(false)` 和 `tlsAutoFallback(false)`；`fromMasterInfo(info, false)` 不会关闭自动降级。
 - CLI 的 `--namespace` 只影响资源查询。`null`、空白或 `all` 表示全命名空间；CLI 没有公开全部 Java 配置项。
 - token 来自 Secret，当前没有自动续期；不要承诺“永久有效”。`MasterInfo.toString()` 掩码 token，不要新增记录完整 token、密码或私钥的日志。
@@ -64,7 +64,7 @@ java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
 
 ## 通用资源 API 约定
 
-- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，可运行的查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.3.0-SNAPSHOT`。
+- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，已有凭据查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，当前源码的 SSH/Redis 全查询 main 示例在 [docs/examples/K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)，运行说明见 [docs/examples/all-queries.md](docs/examples/all-queries.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.5.0-SNAPSHOT`。
 - `ResourceDefinition` 明确 apiVersion、plural、Kind 和作用域；`K8sResources` 是常用常量，不是完整 API 清单。CRD 和其他资源用 Discovery 或显式定义，禁止推测 Kind 的复数。
 - 写入使用完整 Gson JSON，保留未知字段并复制输入；原有简化 POJO 只用于读取，不能拿它们做完整 PUT。PUT 要求 `metadata.resourceVersion`，冲突交由调用方合并。
 - 集群资源不能指定 namespace；命名空间资源的单对象读写和集合删除必须有具体 namespace。只有旧 list 快捷方法把字符串 `all` 解释为跨命名空间，新入口的 `all` 是真实命名空间。
@@ -78,7 +78,7 @@ java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
 - 日常验证使用本地模拟服务，无需真实集群、Docker 或本地 `kubectl`。只有任务本身涉及真实环境时才接入相应集群；运行 CLI 或 `fetch()` 包含资源创建、授权及可能的删除操作。
 - 测试使用 JUnit 4。新增测试服务绑定 `127.0.0.1` 的随机端口，并可靠关闭服务器和临时资源。避免依赖测试执行顺序；带状态的 SA 场景按需使用独立 mock 实例。
 - SSH 命令或 token 流程变更：核对 `MockK8sMasterServer` 的匹配规则，验证复用、新建、重建、禁用重建和异常路径。模拟器的成功响应不能作为真实 Kubernetes 接受命令的证据。
-- Redis 缓存变更：运行 `RedisCredentialsTest`、`ServiceTokenDiscoveryTest`、`MainDemoTest`，验证跨实例命中不执行 SSH、部分缓存/配置变化、401 后显式刷新、Redis 错误、连接归还及写操作不重放。RESP mock 仅覆盖使用的命令，不代表完整 Redis 行为。
+- Redis 缓存变更：运行 `RedisCredentialsTest`、`ServiceTokenDiscoveryTest`、`MainDemoTest`，验证跨实例命中不执行 SSH、部分缓存/配置变化、401 后显式刷新、Redis 错误、连接归还及写操作不重放；客户端托管入口还需验证成功/异常后关闭 Redis socket、Options 不被修改、外部池仍可用以及严格 TLS。RESP mock 仅覆盖使用的命令，不代表完整 Redis 行为。
 - SSH 认证变更：运行 `SshExecutorTest` 与 CLI/E2E 回归。使用临时私钥、独立 home 和 loopback SSH 验证本地配置隔离、错误密码不回退、交互密码与私钥兼容；不得修改或读取真实用户的 `.ssh` 身份文件作为测试数据。
 - API 路由或模型变更：同步 `MockK8sApiServer` 的路由、fixture 和行为断言，覆盖指定命名空间、全命名空间和集群资源。写 API 需核对真实 HTTP 方法、query 编码、Content-Type、正文保留、冲突/权限错误和不重放行为。
 - TLS、认证、异常处理变更：验证对应的成功与失败行为，包括严格模式和自动降级；CLI 参数或输出变更同步核对 `MainDemoTest` 与 `Main.usage()`。

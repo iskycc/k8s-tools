@@ -16,8 +16,10 @@ import com.iskycc.k8s.api.model.Pod;
 import com.iskycc.k8s.api.model.Service;
 import com.iskycc.k8s.api.model.VersionInfo;
 import com.iskycc.k8s.ssh.MasterInfo;
+import com.iskycc.k8s.ssh.RedisServiceTokenCache;
 import com.iskycc.k8s.ssh.ServiceTokenFetcher;
 import com.iskycc.k8s.ssh.SshConfig;
+import redis.clients.jedis.JedisPool;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
@@ -76,8 +78,8 @@ import java.util.Map;
  *
  * <p>典型用法：
  * <pre>
- * MasterInfo info = new ServiceTokenFetcher(sshConfig).fetch();
- * K8sApiClient client = K8sApiClient.fromMasterInfo(info); // 无 CA 时自动 insecure
+ * K8sApiClient client = K8sApiClient.builder()
+ *         .redisUrl("redis://127.0.0.1:6379/0").fromSsh(sshConfig);
  * List&lt;Pod&gt; pods = client.listPods("default");
  * </pre>
  */
@@ -117,11 +119,12 @@ public class K8sApiClient {
         return fromSsh(config, new ServiceTokenFetcher.Options());
     }
 
-    /** 配置 Redis 后优先复用缓存；未命中才连接 SSH。直接跳过 TLS 校验。 */
+    /**
+     * 兼容外部缓存配置的接入入口，直接跳过 TLS 校验。
+     * 由客户端管理 Redis 时使用 {@code builder().redisUrl(url).fromSsh(config)}。
+     */
     public static K8sApiClient fromSsh(SshConfig config, ServiceTokenFetcher.Options options) {
-        MasterInfo info = new ServiceTokenFetcher(config, options).fetch();
-        return builder().apiServer(info.getApiServerUrl()).token(info.getToken())
-                .insecureSkipTlsVerify(true).build();
+        return builder().fromSsh(config, options);
     }
 
     /**
@@ -536,20 +539,100 @@ public class K8sApiClient {
         private String token;
         private String caCertPem;
         private boolean insecureSkipTlsVerify;
+        private boolean insecureConfiguredExplicitly;
         /** TLS 校验失败时自动降级为 trust-all 重试（忽略自签名证书），默认开启。 */
         private boolean tlsAutoFallback = true;
         private int connectTimeoutMs = 10000;
         private int readTimeoutMs = 30000;
+        private String redisUrl;
+        private boolean refreshCache;
 
         public Builder apiServer(String apiServer) { this.apiServer = apiServer; return this; }
         public Builder token(String token) { this.token = token; return this; }
         public Builder caCertPem(String caCertPem) { this.caCertPem = caCertPem; return this; }
-        public Builder insecureSkipTlsVerify(boolean v) { this.insecureSkipTlsVerify = v; return this; }
+        public Builder insecureSkipTlsVerify(boolean v) {
+            this.insecureSkipTlsVerify = v;
+            this.insecureConfiguredExplicitly = true;
+            return this;
+        }
         public Builder tlsAutoFallback(boolean v) { this.tlsAutoFallback = v; return this; }
         public Builder connectTimeoutMs(int v) { this.connectTimeoutMs = v; return this; }
         public Builder readTimeoutMs(int v) { this.readTimeoutMs = v; return this; }
 
+        /**
+         * SSH 接入时使用的 Redis URI，支持 redis/rediss、认证及数据库编号。
+         * null 或空白关闭缓存；连接由 fromSsh 内部创建并关闭，不读取环境变量。
+         */
+        public Builder redisUrl(String v) { this.redisUrl = v; return this; }
+
+        /** SSH 接入前删除当前 master 缓存再获取；需同时配置 redisUrl，不重放业务请求。 */
+        public Builder refreshCache(boolean v) { this.refreshCache = v; return this; }
+
+        /** 使用默认 SA 配置接入，Redis 缓存命中时不连接 SSH。默认直接跳过 TLS 校验。 */
+        public K8sApiClient fromSsh(SshConfig config) {
+            return fromSsh(config, null);
+        }
+
+        /**
+         * 获取凭据并构造客户端。复制 options，不向调用方配置注入内部缓存或修改 Builder。
+         * redisUrl 优先于 options 中的旧式外部缓存；内部连接在返回或异常时关闭。
+         * 严格 TLS 需同时设置 insecureSkipTlsVerify(false) 和 tlsAutoFallback(false)。
+         *
+         * @param config SSH 配置
+         * @param options SA、RBAC 和地址发现配置，null 使用默认值
+         * @return 可立即查询或写入的客户端，无需 close
+         */
+        public K8sApiClient fromSsh(SshConfig config, ServiceTokenFetcher.Options options) {
+            if (config == null) { throw new IllegalArgumentException("SshConfig is required"); }
+            if (apiServer != null || token != null || caCertPem != null) {
+                throw new IllegalArgumentException("fromSsh discovers credentials; use Options for discovery overrides");
+            }
+            if (connectTimeoutMs < 0 || readTimeoutMs < 0) {
+                throw new IllegalArgumentException("timeouts must be >= 0");
+            }
+            URI redisUri = redisUri();
+            if (refreshCache && redisUri == null) {
+                throw new IllegalArgumentException("refreshCache requires redisUrl");
+            }
+            ServiceTokenFetcher.Options effective = options == null
+                    ? new ServiceTokenFetcher.Options() : options.copy();
+            // 仅初始化期间需要 Redis；返回的客户端不持有池或 Redis 密码。
+            try (JedisPool pool = redisUri == null ? null : new JedisPool(redisUri)) {
+                if (pool != null) { effective.redisCache(new RedisServiceTokenCache(pool)); }
+                try (ServiceTokenFetcher fetcher = new ServiceTokenFetcher(config, effective)) {
+                    MasterInfo info = refreshCache ? fetcher.refresh() : fetcher.fetch();
+                    boolean skipTls = !insecureConfiguredExplicitly || insecureSkipTlsVerify;
+                    return K8sApiClient.builder().apiServer(info.getApiServerUrl()).token(info.getToken())
+                            .caCertPem(skipTls ? null : info.getCaCertPem())
+                            .insecureSkipTlsVerify(skipTls).tlsAutoFallback(tlsAutoFallback)
+                            .connectTimeoutMs(connectTimeoutMs).readTimeoutMs(readTimeoutMs).build();
+                }
+            }
+        }
+
+        private URI redisUri() {
+            if (redisUrl == null || redisUrl.trim().isEmpty()) { return null; }
+            URI uri;
+            try {
+                uri = new URI(redisUrl.trim());
+            } catch (URISyntaxException e) {
+                // URI 语法异常会包含原始密码，不放入异常消息或 cause。
+                throw new IllegalArgumentException("Invalid Redis URL syntax");
+            }
+            if (!("redis".equals(uri.getScheme()) || "rediss".equals(uri.getScheme()))
+                    || uri.getHost() == null || uri.getPort() == 0 || uri.getPort() > 65535
+                    || (uri.getRawUserInfo() != null && uri.getRawUserInfo().indexOf(':') < 0)
+                    || uri.getRawQuery() != null || uri.getRawFragment() != null
+                    || (uri.getPath() != null && !uri.getPath().matches("/?[0-9]*"))) {
+                throw new IllegalArgumentException("Redis URL requires redis:// or rediss://, a valid host/database, and [:password@] or [user:password@] authentication");
+            }
+            return uri;
+        }
+
         public K8sApiClient build() {
+            if ((redisUrl != null && !redisUrl.trim().isEmpty()) || refreshCache) {
+                throw new IllegalArgumentException("Redis options require fromSsh instead of build");
+            }
             if (apiServer == null || apiServer.trim().isEmpty()) {
                 throw new IllegalArgumentException("apiServer is required");
             }

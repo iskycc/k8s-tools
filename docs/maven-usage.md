@@ -8,14 +8,14 @@
 | --- | --- |
 | groupId | `io.github.iskycc` |
 | artifactId | `k8s-tools` |
-| 正式版本 | `1.3.0`，新增 Redis 凭据缓存、显式刷新和 SSH 自动接入；包含通用 CRUD、Discovery、分页和子资源接口 |
+| 正式版本 | `1.5.0`，新增客户端托管 Redis 和完整查询 Demo；包含通用 CRUD、Discovery、分页和子资源接口 |
 | 历史快照 | `1.1.0-SNAPSHOT`，需要额外仓库，不含 1.2.0 的 SSH 改动 |
-| 当前源码开发版本 | `1.3.0-SNAPSHOT`，本次不发布该快照，可从源码安装到本地 |
+| 当前源码开发版本 | `1.5.0-SNAPSHOT`，本次不发布该快照，可从源码安装到本地 |
 | Java 包名 | `com.iskycc.k8s`，与 Maven groupId 不同 |
 | 使用环境 | JDK 8+、Maven 3.6.3+ |
 | 依赖类型 | 普通 jar，默认 `compile` scope，无需 classifier |
 
-本次正式版坐标为 `1.3.0`，发布完成后可下载；需要试用快照时再切换版本与仓库。旧版 `1.0.0` 只有查询接口，不能编译本指南中的通用 CRUD 调用。
+本次正式版坐标为 `1.5.0`，发布完成后可下载；需要试用快照时再切换版本与仓库。旧版 `1.0.0` 只有查询接口，不能编译本指南中的通用 CRUD 调用。
 
 ## 现有项目添加正式版依赖
 
@@ -25,7 +25,7 @@
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.3.0</version>
+  <version>1.5.0</version>
 </dependency>
 ```
 
@@ -54,7 +54,7 @@
     <dependency>
       <groupId>io.github.iskycc</groupId>
       <artifactId>k8s-tools</artifactId>
-      <version>1.3.0</version>
+      <version>1.5.0</version>
     </dependency>
   </dependencies>
 
@@ -76,6 +76,8 @@
 ```
 
 将完整示例 [K8sReadExample.java](examples/K8sReadExample.java) 保存为使用方项目的 `src/main/java/K8sReadExample.java`。该示例直接使用已有 API 凭据，查询指定命名空间的 Pod 名称，不经过 SSH 初始化，也不创建集群资源。
+
+需要从 SSH 登录、Redis 配置开始演示所有查询接口时，改用 [K8sAllQueriesExample.java](examples/K8sAllQueriesExample.java)，环境变量和命令见[完整查询 Demo 指南](examples/all-queries.md)。该 Demo 使用 `1.5.0` 新增的客户端托管 Redis 入口，引用上述坐标即可编译；`1.3.0` 不包含该入口。
 
 在使用方项目根目录执行：
 
@@ -100,7 +102,7 @@ Windows 的 classpath 使用 `;` 分隔并用双引号包裹。示例的环境�
 
 ## 使用快照版本
 
-以下以历史快照 `1.1.0-SNAPSHOT` 为例，它不包含 `1.2.0` 的仅密码 SSH 模式。当前源码为 `1.3.0-SNAPSHOT`，本次只发布正式版，不上传新快照。使用历史快照时将依赖版本改为 `1.1.0-SNAPSHOT`，并在使用方 POM 的 `<project>` 下增加与 `<dependencies>` 同级的 `<repositories>`：
+以下以历史快照 `1.1.0-SNAPSHOT` 为例，它不包含 `1.2.0` 的仅密码 SSH 模式。当前源码为 `1.5.0-SNAPSHOT`，本次只发布正式版，不上传新快照。使用历史快照时将依赖版本改为 `1.1.0-SNAPSHOT`，并在使用方 POM 的 `<project>` 下增加与 `<dependencies>` 同级的 `<repositories>`：
 
 ```xml
 <repositories>
@@ -159,12 +161,13 @@ mvn dependency:resolve -Dclassifier=javadoc -DincludeGroupIds=io.github.iskycc
 | 现象 | 检查与处理 |
 | --- | --- |
 | 找不到 `com.iskycc.k8s` | 确认依赖在实际模块的 `<dependencies>` 中，scope 不是 `test`，然后重新加载 Maven 项目 |
-| 找不到 `resource`、`configMaps` 等方法 | 查看依赖树是否仍选中了 `1.0.0`；将坐标版本设为 `1.3.0` |
-| 找不到 `fromSsh`、`redisCache`、`refresh` 方法 | 这些方法从 `1.3.0` 起提供，检查依赖树是否仍使用 `1.2.1` 或旧快照 |
+| 找不到 `resource`、`configMaps` 等方法 | 查看依赖树是否仍选中了 `1.0.0`；将坐标版本设为 `1.5.0` |
+| 找不到 Builder 的 `redisUrl`、`refreshCache`、`fromSsh` 方法 | 从正式版 `1.5.0` 起提供；检查依赖树是否仍选中了 `1.3.0` 或旧快照 |
+| 找不到静态 `fromSsh`、`Options.redisCache`、`ServiceTokenFetcher.refresh` 方法 | 这些方法从 `1.3.0` 起提供，检查依赖树是否仍使用 `1.2.1` 或旧快照 |
 | 找不到 `passwordOnly` 方法 | 该方法从 `1.2.0` 起提供，检查依赖树是否仍使用 `1.1.0` 或旧快照 |
 | 无法解析 `1.1.0-SNAPSHOT` | 确认快照仓库及 `<snapshots>` 已启用，检查镜像设置，再使用 `-U` |
 | `NoClassDefFoundError` | 运行时 classpath 缺少依赖；重新执行 copy-dependencies 或检查应用打包配置 |
 | `NoSuchMethodError` | 查看依赖树，核对 Gson/HttpClient 等是否被其他依赖或 BOM 覆盖 |
 | TLS 错误、401、403 | 依赖已加载，问题位于集群连接或权限；按 [API 错误处理指南](library-api.md#错误与兼容性)排查 |
 
-仓库当前 `pom.xml` 中的 `1.3.0-SNAPSHOT` 是源码开发构建版本，正式版坐标为 `1.3.0`。本指南不需要修改本仓库 POM 或运行任何发布命令。
+仓库当前 `pom.xml` 中的 `1.5.0-SNAPSHOT` 是源码开发构建版本，正式版坐标为 `1.5.0`。本指南不需要修改本仓库 POM 或运行任何发布命令。

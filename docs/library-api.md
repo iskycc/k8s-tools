@@ -1,8 +1,10 @@
 # Java 工具库：资源增删查改
 
-本文使用正式版坐标 `io.github.iskycc:k8s-tools:1.3.0`，发布完成后可从 Maven Central 引用，无需配置额外仓库。通用资源 CRUD 从 `1.1.0` 起提供，仅密码 SSH 模式从 `1.2.0` 起提供；旧版 `1.0.0` 只有查询接口。当前开发构建为 `1.3.0-SNAPSHOT`，可在本仓库运行 `mvn clean install` 安装到本地；本次不发布新快照，远端快照使用规则见[发布指南](publishing.md#发布与使用快照)。
+本文使用正式版坐标 `io.github.iskycc:k8s-tools:1.5.0`，发布完成后可从 Maven Central 引用，无需配置额外仓库。通用资源 CRUD 从 `1.1.0` 起提供，仅密码 SSH 模式从 `1.2.0` 起提供；旧版 `1.0.0` 只有查询接口。当前开发构建为 `1.5.0-SNAPSHOT`，可在本仓库运行 `mvn clean install` 安装到本地；本次不发布新快照，远端快照使用规则见[发布指南](publishing.md#发布与使用快照)。
 
 首次接入先阅读 [Maven 坐标与接入配置](maven-usage.md)，其中提供完整 POM 和可编译运行的[查询示例](examples/K8sReadExample.java)。本文的 Java 代码块是按场景选择的调用片段，放入业务方法中使用；后续片段复用连接示例中的 `client` 和 `configMaps`。创建、删除等示例会修改目标集群，不应把全文作为一个脚本顺序执行。
+
+完整的 **SSH → Redis 缓存 → 自动接入 → 各类查询** 流程见 [main 示例](examples/K8sAllQueriesExample.java)和[运行指南](examples/all-queries.md)。它使用 `1.5.0` 新增的客户端托管 Redis 入口；查询阶段只发 GET，SSH 凭据初始化仍具有上文所述副作用。
 
 | 要完成的任务 | 对应章节 |
 | --- | --- |
@@ -17,7 +19,18 @@
 
 ## 连接与公共入口
 
-**`1.3.0` 新增**：`K8sApiClient.fromSsh(sshConfig, options)` 自动发现 API 地址并跳过证书校验；`Options.redisCache(...)` 可跨进程缓存凭据，`ServiceTokenFetcher.refresh()` 删除缓存后重新获取。详细可运行片段见 [Redis 缓存与自动接入](redis-cache.md)。这些接口从 `1.3.0` 起提供，`1.2.1` 及之前版本不包含。
+**`1.5.0` 新增客户端托管 Redis**：
+
+```java
+K8sApiClient cachedClient = K8sApiClient.builder()
+        .redisUrl("redis://127.0.0.1:6379/0")
+        .refreshCache(false) // true 时先删除旧缓存再 SSH 获取；默认 false。
+        .fromSsh(sshConfig);
+```
+
+`sshConfig` 为 `SshConfig` 实例。客户端负责缓存判断、连接创建和关闭，调用方无需引用 Jedis 或缓存类。`fromSsh` 自动发现 API 地址，默认跳过证书和主机名校验；高级获取选项使用 `fromSsh(sshConfig, options)`，严格 TLS 同时配置 `insecureSkipTlsVerify(false).tlsAutoFallback(false)`。正式版使用 `1.5.0`；从源码构建时先执行 `mvn clean install` 并依赖本地 `1.5.0-SNAPSHOT`，详见 [Redis 缓存与自动接入](redis-cache.md)。
+
+已发布的静态 `K8sApiClient.fromSsh(sshConfig, options)` 与外部缓存配置入口继续兼容，从 `1.3.0` 起提供；`1.2.1` 及之前版本不包含。下文统一使用正式版 `1.5.0`。
 
 已有 API Server 地址和 token 时，直接创建客户端，无需 SSH，也不会创建 ServiceAccount 或 RBAC：
 
@@ -59,9 +72,10 @@ K8sResourceClient configMaps = client.configMaps("default");
 | `apiServer` | API Server 基础地址，例如 `https://192.0.2.10:6443`，不包含资源路径、凭据、query 或 fragment |
 | `token` | 原始 Bearer token，不要自行添加 `Bearer ` 前缀 |
 | `caCertPem` | PEM 文本或多证书 PEM bundle，**不是文件路径**；未提供时使用 JVM 信任库 |
-| `insecureSkipTlsVerify` | 默认 false；true 会直接跳过证书与主机名校验 |
+| `insecureSkipTlsVerify` | `build()` 默认 false；`fromSsh()` 未显式指定时默认 true；true 会直接跳过证书与主机名校验 |
 | `tlsAutoFallback` | 默认 true；严格 TLS 必须设为 false，避免读请求失败后降级 |
 | `connectTimeoutMs` / `readTimeoutMs` | 默认分别为 10000 / 30000 毫秒；可按网络条件设置正值 |
+| `redisUrl` / `refreshCache` | `1.5.0` 新增，仅用于 Builder 的 `fromSsh()`；Redis URL 默认为空、刷新默认 false |
 
 读取 CA 文件的方式见完整查询示例。若 API 证书由 JVM 信任的 CA 签发，可以省略 `caCertPem`，仍应设置 `tlsAutoFallback(false)`。客户端不会自动刷新 token；凭据更新后用新 token 构造客户端。
 
@@ -99,7 +113,7 @@ K8sApiClient strictSshClient = K8sApiClient.builder()
 
 ### 仅使用密码登录 SSH 机器
 
-**本节的 `passwordOnly(true)` 和密码隔离行为从 `1.2.0` 起提供。** `1.1.0` 及之前的远端快照不包含这些改动；使用方应引用 `1.3.0`，或从当前源码执行 `mvn clean install` 后引用本地 `1.3.0-SNAPSHOT`。
+**本节的 `passwordOnly(true)` 和密码隔离行为从 `1.2.0` 起提供。** `1.1.0` 及之前的远端快照不包含这些改动；使用方应引用 `1.5.0`，或从当前源码执行 `mvn clean install` 后引用本地 `1.5.0-SNAPSHOT`。
 
 ```java
 com.iskycc.k8s.ssh.SshConfig passwordSshConfig = com.iskycc.k8s.ssh.SshConfig.builder()

@@ -386,6 +386,26 @@ public class ServiceTokenFetcher implements Closeable {
         private int commandTimeoutMs = 30000;
         private RedisServiceTokenCache redisCache;
 
+        /** 复制配置；已有外部缓存引用仍由原调用方管理。 */
+        public Options copy() {
+            Options copy = new Options();
+            copy.serviceAccount = serviceAccount;
+            copy.serviceAccountNamespace = serviceAccountNamespace;
+            copy.clusterRoleBindingName = clusterRoleBindingName;
+            copy.clusterRole = clusterRole;
+            copy.permanentTokenSecretName = permanentTokenSecretName;
+            copy.recreateSaWhenTokenUnobtainable = recreateSaWhenTokenUnobtainable;
+            copy.tokenWaitRetries = tokenWaitRetries;
+            copy.tokenWaitIntervalMs = tokenWaitIntervalMs;
+            copy.apiServerOverride = apiServerOverride;
+            copy.kubeConfigPath = kubeConfigPath;
+            copy.caCertPath = caCertPath;
+            copy.fetchCaCert = fetchCaCert;
+            copy.commandTimeoutMs = commandTimeoutMs;
+            copy.redisCache = redisCache;
+            return copy;
+        }
+
         private void validate() {
             if (apiServerOverride != null && !apiServerOverride.trim().isEmpty()
                     && !isValidApiServerUrl(apiServerOverride)) {

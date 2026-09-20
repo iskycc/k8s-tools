@@ -1,6 +1,10 @@
 # 工具库完整性核对
 
-核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.3.0-SNAPSHOT`。
+核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.5.0-SNAPSHOT`。
+
+## 1.5.0 客户端托管 Redis
+
+`K8sApiClient.builder().redisUrl(...).refreshCache(...).fromSsh(ssh)` 内部管理缓存判断、SSH 获取和 Redis 连接关闭，业务方无需直接操作 Jedis 或缓存类。保留外部缓存配置入口兼容，新增 [完整查询 main 示例](examples/all-queries.md)。带密码 URL 支持默认用户、ACL 与百分号编码。
 
 ## 1.3.0 Redis 凭据缓存与自动接入
 

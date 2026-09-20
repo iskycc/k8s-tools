@@ -10,14 +10,17 @@
 
 1. [Maven 坐标与接入配置](docs/maven-usage.md)：正式版/快照版、完整 POM、依赖排查。
 2. [可运行的查询示例](docs/examples/K8sReadExample.java)：使用已有 token 与 CA 查询 Pod，兼容 Java 8。
-3. [Redis 凭据缓存与自动接入](docs/redis-cache.md)：缓存 token/API 地址、删除刷新、免手工配置 API 与证书（从 `1.3.0` 起提供）。
+   完整的 SSH → Redis → 各类查询演示见 [main 示例运行指南](docs/examples/all-queries.md)及 [K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)。
+3. [Redis 凭据缓存与自动接入](docs/redis-cache.md)：缓存 token/API 地址、删除刷新、免手工配置 API 与证书；缓存从 `1.3.0` 起提供，客户端托管入口从 `1.5.0` 起提供。
 4. [Java API 使用指南](docs/library-api.md)：连接、CRUD、Deployment/Service、分页、CRD、子资源和错误处理。
 
 ## 项目结构与调用链
 
 ```mermaid
 flowchart LR
-    Main[Main / Java 调用方] --> Fetcher[ServiceTokenFetcher]
+    Main[Main / Java 调用方] --> Connect[K8sApiClient.Builder.fromSsh]
+    Connect --> Fetcher[ServiceTokenFetcher]
+    Fetcher <-->|凭据缓存| Redis[(Redis)]
     Fetcher -->|SshExecutor / SSH| Master[master 上的 kubectl]
     Fetcher --> Info[MasterInfo: 地址、token、CA]
     Info --> Client[K8sApiClient]
@@ -47,7 +50,7 @@ flowchart LR
 
 ## 开源组件与依赖范围
 
-下表对应当前源码的 [pom.xml](pom.xml)。`1.3.0` 新增 Jedis 缓存功能及 Redis 运行依赖；正式版 `1.2.1` 不包含这些新增内容。**`1.2.1` 将 SSHD 升级为 `2.19.0`；已有的 `1.2.0` 仍使用 `2.12.1`。** 源码开发构建版本为 `1.3.0-SNAPSHOT`，正式发布由工作流转换为 `1.3.0`。
+下表对应当前源码的 [pom.xml](pom.xml)。`1.3.0` 新增 Jedis 缓存功能及 Redis 运行依赖；正式版 `1.2.1` 不包含这些新增内容。**`1.2.1` 将 SSHD 升级为 `2.19.0`；已有的 `1.2.0` 仍使用 `2.12.1`。** 源码开发构建版本为 `1.5.0-SNAPSHOT`，正式发布由工作流转换为 `1.5.0`。
 
 运行和测试依赖按 **2026-09-20** 的 Maven Central 版本元数据及上游 Java 要求核对，除按接入要求固定的 Jedis `5.2.0` 外，选用支持 Java 8 的最新稳定版，不选择 alpha、beta、RC、milestone 或 SNAPSHOT。依据和版本选择见[依赖版本核对](docs/dependency-versions.md)。依赖固定为具体版本，后续升级需重新核对并运行 Java 8 测试。
 
@@ -93,15 +96,15 @@ Maven 编译、测试、打包、源码/Javadoc、GPG 和 Central 发布插件�
 
 仅仓库维护者发布版本时需要验证 Central Portal 命名空间并配置发布 token 与 GPG 密钥。使用公开依赖无需这些凭据；接入步骤见 [Maven 配置指南](docs/maven-usage.md)，发布操作见 [Maven Central 发布指南](docs/publishing.md)。
 
-**`1.3.0` 新增 Redis 凭据缓存、显式删除刷新和 `fromSsh` 自动接入，CLI 默认跳过 TLS 证书与主机名校验，可用 `--strict-tls` 开启严格校验。** 保留已有仅密码 SSH 模式及通用资源 CRUD API。 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.3.0-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
+**`1.5.0` 将 Redis 配置、缓存判断和连接生命周期集成到客户端 `Builder.fromSsh`，提供完整查询 main 示例。** `1.3.0` 引入的 Redis 缓存、显式刷新和 SSH 自动发现继续支持；CLI 默认跳过 TLS 校验，可用 `--strict-tls` 开启严格校验。 保留已有仅密码 SSH 模式及通用资源 CRUD API。 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.5.0-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
 
-其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.3.0/) 下载。旧版 `1.0.0` 只提供查询接口。
+其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.5.0/) 下载。旧版 `1.0.0` 只提供查询接口。
 
 ```xml
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.3.0</version>
+  <version>1.5.0</version>
 </dependency>
 ```
 
@@ -121,11 +124,11 @@ mvn test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 检查命令行入口，不连接集群
-java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
-产物为 `target/k8s-tools-1.3.0-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
+产物为 `target/k8s-tools-1.5.0-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
 
 ## 命令行使用
 
@@ -139,7 +142,7 @@ java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
 ### 运行示例
 
 ```bash
-java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --user root --key "$HOME/.ssh/id_rsa" \
   --namespace default
@@ -150,7 +153,7 @@ java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
 只使用密码登录机器、忽略本地 SSH 私钥及用户密钥签名认证：
 
 ```bash
-java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --port 22 --user root \
   --password '<SSH密码>' --password-only \
@@ -179,7 +182,15 @@ java -cp 'target/k8s-tools-1.3.0-SNAPSHOT.jar:target/dependency/*' \
 
 ## Java 库用法
 
-`1.3.0` 新增 `K8sApiClient.fromSsh(sshConfig, options)`：自动发现 API 地址、直接忽略自签名证书；配置 `options.redisCache(new RedisServiceTokenCache(jedisPool))` 后缓存命中不再连接 SSH。用法及失效刷新见 [Redis 接入指南](docs/redis-cache.md)。使用这些接口请引用 `1.3.0` 或更新版本。
+从 `1.5.0` 起可将 Redis 配置直接交给客户端，缓存判断、SSH 获取及连接关闭都由 `fromSsh` 完成：
+
+```java
+K8sApiClient client = K8sApiClient.builder()
+        .redisUrl("redis://127.0.0.1:6379/0")
+        .fromSsh(sshConfig); // SshConfig；无需手工填写 API 地址、token 或证书。
+```
+
+凭据失效后，增加 `.refreshCache(true)` 重新构造客户端即可删除旧缓存并获取新凭据。该 Builder 入口从正式版 `1.5.0` 起提供，也可从源码 `mvn clean install` 后引用本地 `1.5.0-SNAPSHOT`；已发布 `1.3.0` 的静态 `K8sApiClient.fromSsh(sshConfig, options)` 继续兼容。完整示例见 [Redis 接入指南](docs/redis-cache.md)与 [main 查询 Demo](docs/examples/all-queries.md)。
 
 以下代码片段展示默认获取流程，前提同上：
 
@@ -276,7 +287,7 @@ MasterInfo info = new ServiceTokenFetcher(ssh, options).fetch();
 2. 从 `kubeConfigPath` 中用 `awk` 提取首个 `server:` 地址。
 3. 回退为 `https://<SSH主机>:6443`。
 
-发现结果格式无效时继续下一来源；回环/通配地址会替换为 SSH 主机，保留原端口，IPv6 地址自动带方括号。显式 override 不改写；未配置 Redis 时每次发现，缓存命中直接使用缓存地址，地址变化可调用 `refresh()`。
+发现结果格式无效时继续下一来源；回环/通配地址会替换为 SSH 主机，保留原端口，IPv6 地址自动带方括号。显式 override 不改写；未配置 Redis 时每次发现，缓存命中直接使用缓存地址，地址变化可用 `.refreshCache(true).fromSsh(ssh)` 重新接入。
 
 CA 读取失败时返回的 `MasterInfo.caCertPem` 为 `null`，不会终止凭据获取流程。
 

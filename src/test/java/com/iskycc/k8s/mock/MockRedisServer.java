@@ -29,6 +29,8 @@ public final class MockRedisServer implements Closeable {
     private final Set<Socket> clients = Collections.synchronizedSet(new HashSet<Socket>());
     private final Map<String, String> values = new HashMap<String, String>();
     private final List<String> commands = new ArrayList<String>();
+    private List<String> authArguments = Collections.emptyList();
+    private int selectedDatabase;
     private volatile String failingCommand;
 
     public MockRedisServer() throws IOException {
@@ -47,10 +49,13 @@ public final class MockRedisServer implements Closeable {
     }
 
     public int getPort() { return server.getLocalPort(); }
+    public int getConnectedClientCount() { return clients.size(); }
     public synchronized String get(String key) { return values.get(key); }
     public synchronized void put(String key, String value) { values.put(key, value); }
     public synchronized void remove(String key) { values.remove(key); }
     public synchronized List<String> getCommands() { return new ArrayList<String>(commands); }
+    public synchronized List<String> getAuthArguments() { return new ArrayList<String>(authArguments); }
+    public synchronized int getSelectedDatabase() { return selectedDatabase; }
     public void failCommand(String name) { failingCommand = name; }
 
     private void serve(Socket client) {
@@ -93,9 +98,15 @@ public final class MockRedisServer implements Closeable {
             return;
         }
         switch (command) {
-            case "CLIENT":
-            case "SELECT":
             case "AUTH":
+                authArguments = new ArrayList<String>(args);
+                write(output, "+OK\r\n");
+                break;
+            case "SELECT":
+                selectedDatabase = Integer.parseInt(args.get(1));
+                write(output, "+OK\r\n");
+                break;
+            case "CLIENT":
                 write(output, "+OK\r\n");
                 break;
             case "PING":
