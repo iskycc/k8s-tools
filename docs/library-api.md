@@ -2,6 +2,19 @@
 
 本文适用于正式版 `io.github.iskycc:k8s-tools:1.1.0`，可直接从 Maven Central 引用，无需配置额外仓库。旧版 `1.0.0` 只有只读查询接口，不包含本文的 CRUD API。开发构建 `1.1.0-SNAPSHOT` 可通过 [Central Portal 快照仓库](publishing.md#发布与使用快照)获取，也可在本仓库运行 `mvn clean install` 安装到本地。
 
+首次接入先阅读 [Maven 坐标与接入配置](maven-usage.md)，其中提供完整 POM 和可编译运行的[查询示例](examples/K8sReadExample.java)。本文的 Java 代码块是按场景选择的调用片段，放入业务方法中使用；后续片段复用连接示例中的 `client` 和 `configMaps`。创建、删除等示例会修改目标集群，不应把全文作为一个脚本顺序执行。
+
+| 要完成的任务 | 对应章节 |
+| --- | --- |
+| 配置地址、token、CA 或 SSH 初始化 | [连接与公共入口](#连接与公共入口) |
+| 查版本、节点、Pod 等现有资源 | [查询与资源入口选择](#查询与资源入口选择) |
+| 创建、更新、删除资源 | [CRUD 示例](#创建读取修改删除示例)、[Deployment 与 Service](#deployment-与-service-示例) |
+| 选择器、分页、跨命名空间 | [选择器、分页和作用域](#选择器分页和作用域) |
+| 合并更新、声明式管理 | [Patch 与 Apply](#patch-与-apply) |
+| 自定义资源与权限检查 | [资源覆盖与 CRD](#资源覆盖与-crd) |
+| 扩缩容、status、短期 token、原始响应 | [子资源和底层调用](#子资源和底层调用) |
+| 参数与错误处理 | [请求参数速查](#请求参数速查)、[错误与兼容性](#错误与兼容性) |
+
 ## 连接与公共入口
 
 已有 API Server 地址和 token 时，直接创建客户端，无需 SSH，也不会创建 ServiceAccount 或 RBAC：
@@ -17,12 +30,15 @@ import com.iskycc.k8s.api.WriteOptions;
 import com.iskycc.k8s.api.DeleteOptions;
 import com.iskycc.k8s.api.PatchType;
 import com.iskycc.k8s.api.ResourceDefinition;
+import com.iskycc.k8s.api.ApiResponse;
+import com.iskycc.k8s.api.K8sApiException;
 import com.iskycc.k8s.api.model.K8sList;
 
 K8sApiClient client = K8sApiClient.builder()
         .apiServer("https://192.0.2.10:6443")
         .token("<ServiceAccount token>")
         .caCertPem("<集群 CA 的 PEM 文本>")
+        .insecureSkipTlsVerify(false)
         .tlsAutoFallback(false)
         .connectTimeoutMs(10000)
         .readTimeoutMs(30000)
@@ -35,6 +51,80 @@ K8sResourceClient configMaps = client.configMaps("default");
 保留 `K8sApiClient.fromMasterInfo(info)`，可复用 SSH 获取的凭据。SSH 获取流程的权限、副作用和默认 TLS 行为见 [README](../README.md)。
 
 `client.pods(ns)`、`services(ns)`、`deployments(ns)`、`configMaps(ns)`、`secrets(ns)` 是常用资源入口；`namespaces()`、`nodes()` 是集群资源入口。其他资源统一使用 `resource(K8sResources.XXX)` 或 Discovery。客户端每次请求后释放连接，不要求调用方 `close()`；它不是连接池客户端。
+
+| Builder 参数 | 要传入的值 / 默认行为 |
+| --- | --- |
+| `apiServer` | API Server 基础地址，例如 `https://192.0.2.10:6443`，不包含资源路径、凭据、query 或 fragment |
+| `token` | 原始 Bearer token，不要自行添加 `Bearer ` 前缀 |
+| `caCertPem` | PEM 文本或多证书 PEM bundle，**不是文件路径**；未提供时使用 JVM 信任库 |
+| `insecureSkipTlsVerify` | 默认 false；true 会直接跳过证书与主机名校验 |
+| `tlsAutoFallback` | 默认 true；严格 TLS 必须设为 false，避免读请求失败后降级 |
+| `connectTimeoutMs` / `readTimeoutMs` | 默认分别为 10000 / 30000 毫秒；可按网络条件设置正值 |
+
+读取 CA 文件的方式见完整查询示例。若 API 证书由 JVM 信任的 CA 签发，可以省略 `caCertPem`，仍应设置 `tlsAutoFallback(false)`。客户端不会自动刷新 token；凭据更新后用新 token 构造客户端。
+
+### 通过 SSH 获取凭据后严格连接
+
+已有 API 凭据时优先使用前面的直接连接方式。只有需要通过 master 获取凭据时才调用 `fetch()`：它默认创建 SA、token Secret 和指向 `cluster-admin` 的绑定。下面显式关闭 SA 重建，但仍可能创建缺失资源；已有绑定不会核对角色或主体。
+
+```java
+com.iskycc.k8s.ssh.SshConfig sshConfigForApi = com.iskycc.k8s.ssh.SshConfig.builder()
+        .host("192.0.2.10")
+        .port(22)
+        .username("<SSH 用户名>")
+        .privateKeyPath("/absolute/path/to/id_rsa")
+        .connectTimeoutMs(15000)
+        .build();
+com.iskycc.k8s.ssh.ServiceTokenFetcher.Options fetchOptions =
+        new com.iskycc.k8s.ssh.ServiceTokenFetcher.Options()
+                .recreateSaWhenTokenUnobtainable(false)
+                .apiServerOverride("https://192.0.2.10:6443");
+com.iskycc.k8s.ssh.MasterInfo fetchedInfo =
+        new com.iskycc.k8s.ssh.ServiceTokenFetcher(sshConfigForApi, fetchOptions).fetch();
+
+if (fetchedInfo.getCaCertPem() == null || fetchedInfo.getCaCertPem().trim().isEmpty()) {
+    throw new IllegalStateException("未取得集群 CA，请先提供可信 CA");
+}
+K8sApiClient strictSshClient = K8sApiClient.builder()
+        .apiServer(fetchedInfo.getApiServerUrl())
+        .token(fetchedInfo.getToken())
+        .caCertPem(fetchedInfo.getCaCertPem())
+        .insecureSkipTlsVerify(false)
+        .tlsAutoFallback(false)
+        .build();
+```
+
+私钥有口令时用 `privateKeyPassphrase(...)`；密码认证使用 `password(...)`，示例中的值应从应用配置中提供。`fetch()` 在成功或失败后都会关闭 SSH。SSH 主机密钥校验和默认副作用见 [README](../README.md#默认行为与配置)。`fromMasterInfo(info, false)` 只控制缺 CA 时的初始模式，不会关闭 TLS 自动降级。
+
+## 查询与资源入口选择
+
+```java
+com.iskycc.k8s.api.model.VersionInfo versionInfo = client.getVersion();
+java.util.List<com.iskycc.k8s.api.model.Node> nodeSummaries = client.listNodes();
+java.util.List<com.iskycc.k8s.api.model.Pod> podSummaries = client.listPods("default");
+
+// 新入口返回完整 JSON，可读取未知字段，也可用于后续更新。
+JsonObject podDocument = client.pods("default").get("web-pod");
+boolean podExists = client.pods("default").exists("web-pod");
+K8sList<JsonObject> namespacePage = client.namespaces().list();
+
+// 非快捷入口的资源使用常量，操作方法与 ConfigMap 相同。
+K8sResourceClient jobs = client.resource(K8sResources.JOBS).inNamespace("default");
+K8sResourceClient persistentVolumes = client.resource(K8sResources.PERSISTENT_VOLUMES);
+```
+
+| 资源 | 入口示例 | 作用域 |
+| --- | --- | --- |
+| Pod / Service / Deployment | `client.pods(ns)` / `services(ns)` / `deployments(ns)` | 指定命名空间 |
+| ConfigMap / Secret | `client.configMaps(ns)` / `secrets(ns)` | 指定命名空间；Secret 正文不要直接输出到日志 |
+| StatefulSet / DaemonSet / Job / CronJob | `client.resource(K8sResources.STATEFUL_SETS)` 等，再 `.inNamespace(ns)` | 指定命名空间 |
+| PVC / Ingress / RoleBinding | `PERSISTENT_VOLUME_CLAIMS` / `INGRESSES` / `ROLE_BINDINGS` 常量入口 | 指定命名空间 |
+| Namespace / Node | `client.namespaces()` / `nodes()` | 集群 |
+| PV / StorageClass / ClusterRole | `PERSISTENT_VOLUMES` / `STORAGE_CLASSES` / `CLUSTER_ROLES` 常量入口 | 集群 |
+| CRD 定义本身 | `client.resource(K8sResources.CUSTOM_RESOURCE_DEFINITIONS)` | 集群 |
+| CRD 的实例 | `client.resource("sample.example/v1", "widgets")` | 由 Discovery 决定 |
+
+`exists()` 会发起 GET；只有 404 返回 false，401/403 和网络错误仍抛出异常。先 `exists()` 再 `create()` 不构成原子操作，其他调用者可能在两次请求之间创建同名资源，需处理创建时的 409。
 
 ## 公共方法与 Kubernetes 动作
 
@@ -86,6 +176,46 @@ PUT 是完整替换，遗漏字段可能被清除。409 表示版本冲突，应
 
 DELETE 成功表示服务端接受删除请求；finalizer、宽限期和级联删除可能使对象继续存在。客户端没有自动等待最终消失。`gracePeriodSeconds(0)`、Foreground/Background/Orphan 和 resourceVersion/UID 前置条件均可通过 `DeleteOptions` 指定。
 
+忽略不存在的对象，或按标签删除一组资源：
+
+```java
+boolean deleteAccepted = configMaps.deleteIfExists("obsolete-settings", null);
+
+// dryRun(true) 仅请求服务端校验；改为 false 才会实际删除匹配的 Job。
+JsonObject deletePreview = client.resource(K8sResources.JOBS).inNamespace("default")
+        .deleteCollection(ListOptions.builder().labelSelector("cleanup-group=demo").build(),
+                DeleteOptions.builder().dryRun(true)
+                        .propagationPolicy(DeleteOptions.PropagationPolicy.Background).build());
+```
+
+`deleteIfExists` 返回 true 表示服务端接受删除，false 表示 404；它不等待对象消失。集合删除要求资源支持 `deletecollection`，且应明确提供选择器。
+
+## Deployment 与 Service 示例
+
+在已有 `default` 命名空间中声明一个工作负载和对应 Service。先替换示例镜像地址，确保 token 具有相应的 `patch` 权限及准入许可。以下两个 Apply 会分别写入资源，不构成跨资源事务。
+
+```java
+JsonObject deploymentManifest = JsonParser.parseString(
+        "{\"metadata\":{\"name\":\"web\"},\"spec\":{\"replicas\":2,"
+        + "\"selector\":{\"matchLabels\":{\"app\":\"web\"}},"
+        + "\"template\":{\"metadata\":{\"labels\":{\"app\":\"web\"}},"
+        + "\"spec\":{\"containers\":[{\"name\":\"web\","
+        + "\"image\":\"registry.example.com/team/web:1.0.0\","
+        + "\"ports\":[{\"containerPort\":8080}]}]}}}}")
+        .getAsJsonObject();
+client.deployments("default").apply(deploymentManifest, "my-java-tool", false);
+
+JsonObject serviceManifest = JsonParser.parseString(
+        "{\"metadata\":{\"name\":\"web\"},\"spec\":{\"selector\":{\"app\":\"web\"},"
+        + "\"ports\":[{\"name\":\"http\",\"port\":80,\"targetPort\":8080}]}}")
+        .getAsJsonObject();
+client.services("default").apply(serviceManifest, "my-java-tool", false);
+
+client.deployments("default").scale("web", 3);
+```
+
+通用入口补齐 apiVersion、kind 和 namespace；spec 等资源专属字段仍由调用方提供。Apply 返回只表示请求完成，不会等待 Deployment 就绪、Pod 拉取镜像成功或 Service 拥有可用端点。`force=false` 遇到字段管理冲突会抛出 409。
+
 ## 选择器、分页和作用域
 
 ```java
@@ -127,6 +257,11 @@ configMaps.patch("tool-settings", PatchType.MERGE_PATCH,
 // JSON Patch：按 RFC 6902 操作数组，可用 test 做乐观并发控制。
 client.deployments("default").patch("web", PatchType.JSON_PATCH,
         JsonParser.parseString("[{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":3}]"));
+
+// Strategic Merge Patch：按服务端定义的合并键更新内置资源列表。
+client.deployments("default").patch("web", PatchType.STRATEGIC_MERGE_PATCH,
+        JsonParser.parseString("{\"spec\":{\"template\":{\"spec\":{\"containers\":["
+                + "{\"name\":\"web\",\"image\":\"registry.example.com/team/web:1.0.1\"}]}}}}"));
 
 // Apply：传入希望管理的字段，使用稳定的 fieldManager。
 configMaps.apply(manifest, "my-java-tool", false);
@@ -174,6 +309,17 @@ Discovery 入口会在请求前拒绝服务端未声明的动作；手动定义�
 
 审查类资源通常只支持 create，不要求资源名称。例如 [SelfSubjectAccessReview](https://kubernetes.io/docs/reference/access-authn-authz/authorization/) 可检查当前身份是否拥有指定权限，结果从响应的 `status.allowed` 读取。
 
+```java
+JsonObject accessReview = client.resource(K8sResources.SELF_SUBJECT_ACCESS_REVIEWS)
+        .create(JsonParser.parseString(
+                "{\"spec\":{\"resourceAttributes\":{\"namespace\":\"default\","
+                + "\"group\":\"apps\",\"resource\":\"deployments\",\"verb\":\"patch\"}}}")
+                .getAsJsonObject());
+boolean allowed = accessReview.getAsJsonObject("status").get("allowed").getAsBoolean();
+```
+
+该审查需要有权限调用对应的审查 API。查询权限的结果不替代实际操作时的服务端校验，也不保证稍后的请求一定成功。
+
 ## 子资源和底层调用
 
 ```java
@@ -196,7 +342,71 @@ JsonObject result = client.resource(K8sResources.SERVICE_ACCOUNTS).inNamespace("
 
 底层 `client.request(method, path, query, body, contentType)` 支持 GET、HEAD、OPTIONS、POST、PUT、PATCH、DELETE，返回 `ApiResponse` 的状态码、正文和多值响应头，可读取 Warning 等信息。`getRaw(path)` 保持兼容。该接口是缓冲整个响应的同步 REST 接口，不适合 watch、日志跟随、exec/attach、port-forward 等长连接或协议升级操作。
 
+```java
+java.util.Map<String, String> rawQuery = new java.util.LinkedHashMap<String, String>();
+rawQuery.put("labelSelector", "app=web");
+rawQuery.put("limit", "20");
+ApiResponse rawResponse = client.request("GET", "/api/v1/namespaces/default/pods",
+        rawQuery, null, null);
+int httpStatus = rawResponse.getStatusCode();
+java.util.List<String> warnings = rawResponse.getHeader("Warning");
+JsonObject rawDocument = JsonParser.parseString(rawResponse.getBody()).getAsJsonObject();
+```
+
+query 值按原文传入，不预先编码；GET/HEAD 的 body 必须为 null，有正文时必须提供 Content-Type。原始接口不会按资源定义补齐或验证正文身份，调用方负责路径和正文一致。非 2xx 响应直接抛出异常，不会返回 `ApiResponse`。
+
+## 请求参数速查
+
+参数对象均通过 `builder().…build()` 构造。未传 options 或传入 null 使用服务器默认行为；`apply` 例外，必须通过字符串重载或 WriteOptions 提供 fieldManager。
+
+| 参数对象 | 方法 | 作用与约束 |
+| --- | --- | --- |
+| `ListOptions` | `labelSelector` / `fieldSelector` | 标签或字段筛选，字段支持范围由资源类型决定 |
+| `ListOptions` | `limit(long)` / `continueToken(String)` | 页大小与不透明续页 token；limit 非负 |
+| `ListOptions` | `resourceVersion` / `resourceVersionMatch` | 版本条件；match 为 Exact 或 NotOlderThan，必须同时提供 resourceVersion |
+| `ListOptions` | `timeoutSeconds(long)` | 服务端请求超时，必须大于 0；客户端 readTimeoutMs 独立配置 |
+| `WriteOptions` | `dryRun(true)` | 只请求服务端校验，不保存资源 |
+| `WriteOptions` | `fieldManager(String)` | 字段管理者标识，不能为空且最长 128 字符；Apply 必填 |
+| `WriteOptions` | `fieldValidation(String)` | Ignore、Warn 或 Strict，是否支持取决于服务端版本 |
+| `DeleteOptions` | `uid` / `resourceVersion` | 删除前置条件，防止删除已被替换或更新的对象 |
+| `DeleteOptions` | `gracePeriodSeconds(long)` | 非负宽限期，具体支持取决于资源 |
+| `DeleteOptions` | `propagationPolicy(...)` | 枚举 Foreground、Background、Orphan |
+| `DeleteOptions` | `dryRun(true)` | 只校验删除请求，不实际删除 |
+
+`subresource().create/replace/patch` 的 options 参数不能省略，不需要附加参数时传 null。子资源没有通用 `delete` 方法，特殊 API 可使用底层 `request` 并遵循服务端协议。
+
 ## 错误与兼容性
+
+```java
+try {
+    configMaps.patch("tool-settings", PatchType.MERGE_PATCH,
+            JsonParser.parseString("{\"data\":{\"feature\":\"on\"}}"));
+} catch (K8sApiException e) {
+    switch (e.getStatusCode()) {
+        case 401:
+            throw new IllegalStateException("凭据无效或过期，请更新 token 后重建客户端", e);
+        case 403:
+            throw new IllegalStateException("当前身份没有目标资源操作权限，请检查 RBAC", e);
+        case 409:
+            throw new IllegalStateException("发生冲突，请重新读取资源并按业务规则合并", e);
+        case -1:
+            throw new IllegalStateException("网络或 TLS 失败；写入结果可能未知，请核对资源状态", e);
+        default:
+            throw e;
+    }
+}
+```
+
+| 状态 | 调用方处理方式 |
+| --- | --- |
+| 404 | 检查对象名、命名空间及 API 版本；仅 exists/deleteIfExists 将它转为 false |
+| 409 | 根据 create、PUT 或 Apply 区分同名、版本或字段所有权冲突；不要无条件覆盖 |
+| 410 | 列表续页 token 过期；调用方决定是否重新开始整个列表读取 |
+| 422 | 检查字段、必需值或准入规则，按需读取 `getReason()`、`getStatusMessage()` |
+| 429 | 检查 `getResponseHeaders().get("retry-after")`，由调用方安排限速与重试 |
+| -1 | 检查 cause、网络、CA 和主机名；写请求断线不代表服务端一定未执行 |
+
+错误正文可能包含敏感数据，默认不要直接打印 `getResponseBody()` 或完整 Secret。参数/作用域不合法会抛 `IllegalArgumentException`；Discovery 明确不支持的动作抛 `UnsupportedOperationException`；解析或分页异常可表现为 `K8sToolsException`，不会全部转为 HTTP 状态码。
 
 - HTTP 非 2xx 抛出 `K8sApiException`，可读取 `getStatusCode()`、`getReason()`、`getStatusMessage()`、`getResponseBody()` 和 `getResponseHeaders()`；网络错误状态码为 -1，并保留 cause。
 - 409、410、422、429 等均交给调用方处理；不会自动重试写请求、吞掉权限错误或自动覆盖版本冲突。

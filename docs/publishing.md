@@ -1,5 +1,7 @@
 # 发布到 Maven Central
 
+如果只是将本项目作为依赖使用，请阅读 [Maven 坐标与接入配置](maven-usage.md)和 [Java API 指南](library-api.md)，无需配置本文的发布 Secrets。
+
 发布坐标为 `io.github.iskycc:k8s-tools`，许可证为 [Apache License 2.0](../LICENSE)。正式版通过 Sonatype Central Portal 的 [Maven 发布插件](https://central.sonatype.org/publish/publish-portal-maven/) 上传，配置位于 [pom.xml](../pom.xml) 的 `release` profile；快照通过 `snapshot` profile 和 Maven Deploy 插件上传到 Central Portal Snapshots。Maven `groupId` 与 Java 包名独立，Java API 的 import 仍使用 `com.iskycc.k8s`。
 
 ## 流水线行为

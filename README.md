@@ -6,6 +6,12 @@
 
 **SSH 凭据初始化会修改资源**：默认使用 `kube-system/k8s-tools` ServiceAccount，并创建指向 `cluster-admin` 的 ClusterRoleBinding；已有 ServiceAccount 无法读取 token 时，默认删除后重建。读取请求的 TLS 校验失败时默认自动降级。接入前请阅读[默认行为与配置](#默认行为与配置)及[真实集群接入限制](#真实集群接入限制)。
 
+作为依赖接入时，按以下顺序阅读：
+
+1. [Maven 坐标与接入配置](docs/maven-usage.md)：正式版/快照版、完整 POM、依赖排查。
+2. [可运行的查询示例](docs/examples/K8sReadExample.java)：使用已有 token 与 CA 查询 Pod，兼容 Java 8。
+3. [Java API 使用指南](docs/library-api.md)：连接、CRUD、Deployment/Service、分页、CRD、子资源和错误处理。
+
 ## 项目结构与调用链
 
 ```mermaid
@@ -38,7 +44,7 @@ flowchart LR
 
 [Maven CI](.github/workflows/ci.yml) 在 `main` 提交和 PR 上使用 Java 8、21 构建并运行测试。[发布流水线](.github/workflows/publish.yml) 在正式 GitHub Release 发布后，将项目 jar、源码、Javadoc、POM 和 GPG 签名上传到 Central Portal，上传成功后结束；后续校验和正式发布由 Central 自动处理。Actions 成功不表示产物已可下载，最终状态见 Portal 的 Deployments。
 
-首次使用需要确认 Central Portal 中的 `io.github.iskycc` 命名空间已验证，并配置 Central Portal token 与 GPG 密钥。配置步骤、Secrets 名称、版本规则和本地验证命令见 [Maven Central 发布指南](docs/publishing.md)。
+仅仓库维护者发布版本时需要验证 Central Portal 命名空间并配置发布 token 与 GPG 密钥。使用公开依赖无需这些凭据；接入步骤见 [Maven 配置指南](docs/maven-usage.md)，发布操作见 [Maven Central 发布指南](docs/publishing.md)。
 
 **`1.1.0` 正式版已发布，包含通用资源 CRUD API。** 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本仍为 `1.1.0-SNAPSHOT`，快照使用方式见[快照仓库配置](docs/publishing.md#发布与使用快照)。
 
