@@ -359,9 +359,12 @@ public class RealKubernetesIT {
                     + "\"properties\":{\"size\":{\"type\":\"integer\"}}},"
                     + "\"status\":{\"type\":\"object\",\"x-kubernetes-preserve-unknown-fields\":true}}}}}]}}"));
             await("CRD 应由 apiserver 建立", () -> {
-                JsonObject status = definitions.get(crdName).getAsJsonObject("status");
-                if (status == null || !status.has("conditions")) { return false; }
-                for (JsonElement item : status.getAsJsonArray("conditions")) {
+                JsonElement status = definitions.get(crdName).get("status");
+                if (status == null || status.isJsonNull()) { return false; }
+                JsonElement conditions = status.getAsJsonObject().get("conditions");
+                // CRD 刚创建时 conditions 可能为 JSON null，继续等待控制器设置 Established=True。
+                if (conditions == null || conditions.isJsonNull()) { return false; }
+                for (JsonElement item : conditions.getAsJsonArray()) {
                     JsonObject condition = item.getAsJsonObject();
                     if ("Established".equals(condition.get("type").getAsString())
                             && "True".equals(condition.get("status").getAsString())) { return true; }
