@@ -102,7 +102,9 @@ public class RedisCredentialsTest {
         K8sApiClient cached = managedClient().fromSsh(config);
         assertEquals(before, master.getExecutedCommands().size());
         // mock /version 为 1.28：应选 SSH；模拟 master 没有 kubectl exec 处理器，明确返回 127。
-        assertEquals(127, cached.exec("default", "pod", "date").getExitCode());
+        api.enqueueResponse(200, "{\"items\":[{\"metadata\":{\"namespace\":\"default\",\"name\":\"pod\"},"
+                + "\"spec\":{\"containers\":[{\"name\":\"app\"}]}}]}");
+        assertEquals(127, cached.searchPodsDetailed("pod").get(0).exec("date").getExitCode());
         assertEquals(before + 1, master.getExecutedCommands().size());
         assertTrue(master.getExecutedCommands().get(before).startsWith("set -eu\numask 077\n"));
         assertRedisDisconnected();

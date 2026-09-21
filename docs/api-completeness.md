@@ -1,6 +1,10 @@
 # 工具库完整性核对
 
-核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.6.1-SNAPSHOT`。
+核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.6.2-SNAPSHOT`。
+
+## 1.6.2 类型化 Details 与 PodDetails 执行
+
+新增类型化详细结果：14 类具体资源详细搜索返回自己的 `ResourceDetails` 子类，Pod IP、启动时间、节点、容器名和状态等可直接 getter 读取；ConfigMap 不暴露 Pod 专属方法。通用资源搜索仍返回公共基类。返回类型迁移及字段范围见[搜索 SDK](resource-search.md)。查询返回的 PodDetails 绑定原客户端，可直接 `K8sTools.exec(pod, ...)`、`pod.exec(...)` 或 `client.exec(pod, ...)`；复用原来的 TLS、凭据和 SSH 通道，不重新初始化，多容器需显式选择。
 
 ## 1.6.1 K8sInstance 统一初始化
 

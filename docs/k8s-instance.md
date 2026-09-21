@@ -1,6 +1,6 @@
 # K8sInstance：统一初始化与完整工具调用
 
-`K8sInstance` 和 `K8sTools` 从正式版 **`1.6.1`** 起提供，`1.6.0` 不包含。业务项目按 [Maven 配置指南](maven-usage.md)引用 `io.github.iskycc:k8s-tools:1.6.1`，发布完成后可从 Maven Central 下载。也可先在本仓库执行 `mvn install`，引用本地 `1.6.1-SNAPSHOT`；本次不发布远端快照。
+`K8sInstance` 和 `K8sTools` 从正式版 **`1.6.1`** 起提供，`1.6.0` 不包含。业务项目按 [Maven 配置指南](maven-usage.md)引用 `io.github.iskycc:k8s-tools:1.6.2`，发布完成后可从 Maven Central 下载。也可先在本仓库执行 `mvn install`，引用本地 `1.6.2-SNAPSHOT`；本次不发布远端快照。
 
 ## 七个参数初始化目标集群
 
@@ -58,11 +58,25 @@ for (com.iskycc.k8s.api.model.PodSummary pod : tools.searchPods("nginx")) {
 }
 ```
 
+从 `1.6.2` 起，详细搜索可直接读取 Pod 专属字段；下面的 `PodDetails` 不包含在旧版 1.6.1 中：
+
+```java
+for (com.iskycc.k8s.api.model.PodDetails pod : tools.searchPodsDetailed("nginx")) {
+    System.out.println(pod.getNamespace() + "/" + pod.getPodName()
+            + " IP=" + pod.getPodIP() + " node=" + pod.getNodeName()
+            + " hostIP=" + pod.getHostIP() + " startTime=" + pod.getStartTime()
+            + " containers=" + pod.getContainerNames());
+}
+```
+
+`getContainerNames()` 返回全部普通容器名；初始化和临时容器分别用 `getInitContainerNames()`、`getEphemeralContainerNames()`。未分配 IP 或节点时返回 null。ConfigMap、Service 等返回自己的 Details 子类，完整 getter 及 List 泛型迁移说明见[详细搜索结果](resource-search.md#详细结果怎么读取)。
+
 选定目标后执行命令（namespace、podName、container 应来自选定的同一个对象）：
 
 ```java
-com.iskycc.k8s.api.PodExecResult result = tools.execShell(
-        namespace, podName,
+// pod 是 tools.searchPodsDetailed(...) 查询并选定的 PodDetails；无需再次 init。
+com.iskycc.k8s.api.PodExecResult result = K8sTools.execShell(
+        pod,
         com.iskycc.k8s.api.PodExecOptions.builder().container(container).build(),
         "ls -al /tmp");
 System.out.print(result.getStdout());
@@ -71,6 +85,8 @@ System.out.println("退出码：" + result.getExitCode());
 ```
 
 Pod Exec 保留 WebSocket/旧集群 SSH 自动选择行为，不会因使用此入口丢失 SSH 配置。完整参数和行为见 [公共 API](library-api.md)、[14 类资源搜索](resource-search.md)、[Pod Exec](pod-exec.md)。
+
+单容器可省略 options，直接 `K8sTools.execShell(pod, "ls -al /tmp")`；也支持 `pod.exec(...)`、`pod.execShell(...)` 和 `tools.exec(pod, ...)`。这些入口各自执行一次，选择一种即可。多容器必须指定名称；执行失败不自动刷新或重试。
 
 ## 显式刷新凭据
 
@@ -96,7 +112,7 @@ tools = K8sTools.refresh(instance, options); // 仅在需要时调用
 
 ## 可运行 main 示例
 
-[K8sInstanceExample.java](examples/K8sInstanceExample.java) 从环境变量读取七个参数，展示版本、跨 namespace Pod/ConfigMap/Service 搜索及 Discovery；初始化后的请求均为查询。
+[K8sInstanceExample.java](examples/K8sInstanceExample.java) 从环境变量读取七个参数，展示版本、跨 namespace Pod/ConfigMap/Service 搜索及 Discovery；初始化后的请求均为查询。示例使用 1.6.2 的 `PodDetails`，展示 Pod IP、节点、启动时间、全部容器名及容器状态。实际执行示例见 [K8sPodSearchExecExample](examples/pod-search-exec.md)。
 
 ```bash
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime

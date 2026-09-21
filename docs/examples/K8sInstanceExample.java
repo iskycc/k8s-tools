@@ -3,14 +3,15 @@ import com.iskycc.k8s.K8sTools;
 import com.iskycc.k8s.api.K8sApiClient;
 import com.iskycc.k8s.api.K8sApiException;
 import com.iskycc.k8s.api.model.PodSummary;
-import com.iskycc.k8s.api.model.ResourceDetails;
+import com.iskycc.k8s.api.model.PodDetails;
+import com.iskycc.k8s.api.model.ContainerStatusDetails;
 import com.iskycc.k8s.api.model.ResourceSummary;
 
 import java.util.List;
 
 /**
  * Java 8：七个参数构造 K8sInstance，统一初始化后使用完整 SDK。
- * 依赖 io.github.iskycc:k8s-tools:1.6.1；此入口从 1.6.1 起提供，1.6.0 不含。
+ * K8sInstance 从 1.6.1 起提供；本示例使用 1.6.2 的类型化 Details。
  * 本示例位于 docs，不进入发布包。SSH 初始化可能写入 SA/Secret/RBAC，后续仅查询。
  */
 public final class K8sInstanceExample {
@@ -43,10 +44,17 @@ public final class K8sInstanceExample {
             }
             showIdentities("ConfigMap 简易结果", tools.searchConfigMaps(keyword));
             showIdentities("Service 简易结果", tools.searchServices(keyword));
-            for (ResourceDetails pod : tools.searchPodsDetailed(keyword)) {
+            for (PodDetails pod : tools.searchPodsDetailed(keyword)) {
                 System.out.println("Pod 详细结果：" + pod.getNamespace() + "/" + pod.getName()
-                        + " resourceVersion=" + pod.getResourceVersion());
-                // pod.getSpec() / getStatus() / toJson() 可读取详细字段，本示例不打印完整正文。
+                        + " podIP=" + pod.getPodIP() + " hostIP=" + pod.getHostIP()
+                        + " node=" + pod.getNodeName() + " startTime=" + pod.getStartTime()
+                        + " phase=" + pod.getPhase() + " containers=" + pod.getContainerNames());
+                // Pending Pod 的 IP/启动时间可能为 null；多个容器全部返回，不默认取第一个。
+                for (ContainerStatusDetails container : pod.getContainerStatuses()) {
+                    System.out.println("  container=" + container.getName() + " ready=" + container.getReady()
+                            + " restartCount=" + container.getRestartCount()
+                            + " state=" + container.getState().getType() + " startedAt=" + container.getStartedAt());
+                }
             }
             System.out.println("已发现 API 版本数：" + tools.discoverApiVersions().size());
         } catch (K8sApiException e) {

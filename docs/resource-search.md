@@ -1,6 +1,8 @@
 # 跨全部 namespace 搜索资源（1.6.0 起）
 
-入口是 `K8sApiClient`，不需要传 namespace。每种资源都有简易版和详细版，均返回全部名称匹配项的 `List`，没有匹配时返回空 List。先按 [Maven 配置](maven-usage.md)引用 `io.github.iskycc:k8s-tools:1.6.1`，通过已有 API 凭据或 [SSH/Redis](redis-cache.md)创建 `client`。
+入口是 `K8sApiClient`，不需要传 namespace。每种资源都有简易版和详细版，均返回全部名称匹配项的 `List`，没有匹配时返回空 List。通过已有 API 凭据或 [SSH/Redis](redis-cache.md)创建 `client`。
+
+**`1.6.2` 新增类型化详细结果，`1.6.1` 不包含这些子类。** 按 [Maven 配置](maven-usage.md)引用 `io.github.iskycc:k8s-tools:1.6.2`，发布完成后可下载；也可本地 `mvn install` 后引用 `1.6.2-SNAPSHOT`。`1.6.0`、`1.6.1` 的具体资源详细搜索均返回 `List<ResourceDetails>`；`1.6.2` 改为 `List<PodDetails>` 等具体类型。旧代码的 `List<ResourceDetails>` 变量需改为对应子类列表，或 `List<? extends ResourceDetails>`；不能将 `List<PodDetails>` 直接赋给 `List<ResourceDetails>`。通用方法 `searchResourcesDetailed` 的返回类型保持不变。
 
 ## 最小调用
 
@@ -8,6 +10,9 @@
 import com.iskycc.k8s.api.model.PodSummary;
 import com.iskycc.k8s.api.model.ResourceSummary;
 import com.iskycc.k8s.api.model.ResourceDetails;
+import com.iskycc.k8s.api.model.PodDetails;
+import com.iskycc.k8s.api.model.ConfigMapDetails;
+import com.iskycc.k8s.api.model.ServiceDetails;
 import java.util.List;
 
 // 简易版：每个 Pod 只有 namespace、name、containerNames。
@@ -22,33 +27,33 @@ List<ResourceSummary> configs = client.searchConfigMaps("app-config");
 List<ResourceSummary> services = client.searchServices("gateway");
 
 // 详细版：身份、常用元数据和完整的资源字段。
-List<ResourceDetails> podDetails = client.searchPodsDetailed("nginx");
-List<ResourceDetails> configDetails = client.searchConfigMapsDetailed("app-config");
-List<ResourceDetails> serviceDetails = client.searchServicesDetailed("gateway");
+List<PodDetails> podDetails = client.searchPodsDetailed("nginx");
+List<ConfigMapDetails> configDetails = client.searchConfigMapsDetailed("app-config");
+List<ServiceDetails> serviceDetails = client.searchServicesDetailed("gateway");
 ```
 
 `getPodName()` 是 `getName()` 的别名，底层只保存一份名称。`getContainerNames()` 只包含 `spec.containers` 的普通容器，不包含 init/ephemeral 容器。简易结果不保留原始 JSON，容器名称列表不可修改；结果的外层 List 可由调用方自行排序或筛选。
 
 ## 公共方法清单
 
-下列方法都有 `(String keyword)` 和 `(String keyword, ListOptions options)` 两个重载。详细版统一返回 `List<ResourceDetails>`。
+下列方法都有 `(String keyword)` 和 `(String keyword, ListOptions options)` 两个重载。详细版返回对应子类的 List，全部子类继承 `ResourceDetails`；Deployment、StatefulSet、DaemonSet、ReplicaSet、Job 还共享中间类 `WorkloadDetails` 的 Pod 模板读取方法。
 
-| 资源 | 简易版 | 详细版 | 简易 List 元素 |
-| --- | --- | --- | --- |
-| Pod | `searchPods` | `searchPodsDetailed` | `PodSummary` |
-| ConfigMap | `searchConfigMaps` | `searchConfigMapsDetailed` | `ResourceSummary` |
-| Service | `searchServices` | `searchServicesDetailed` | `ResourceSummary` |
-| Deployment | `searchDeployments` | `searchDeploymentsDetailed` | `ResourceSummary` |
-| StatefulSet | `searchStatefulSets` | `searchStatefulSetsDetailed` | `ResourceSummary` |
-| DaemonSet | `searchDaemonSets` | `searchDaemonSetsDetailed` | `ResourceSummary` |
-| ReplicaSet | `searchReplicaSets` | `searchReplicaSetsDetailed` | `ResourceSummary` |
-| Job | `searchJobs` | `searchJobsDetailed` | `ResourceSummary` |
-| CronJob | `searchCronJobs` | `searchCronJobsDetailed` | `ResourceSummary` |
-| Ingress | `searchIngresses` | `searchIngressesDetailed` | `ResourceSummary` |
-| PersistentVolumeClaim | `searchPersistentVolumeClaims` | `searchPersistentVolumeClaimsDetailed` | `ResourceSummary` |
-| Secret | `searchSecrets` | `searchSecretsDetailed` | `ResourceSummary` |
-| ServiceAccount | `searchServiceAccounts` | `searchServiceAccountsDetailed` | `ResourceSummary` |
-| NetworkPolicy | `searchNetworkPolicies` | `searchNetworkPoliciesDetailed` | `ResourceSummary` |
+| 资源 | 简易版 | 详细版 | 简易 List 元素 | 详细 List 元素 |
+| --- | --- | --- | --- | --- |
+| Pod | `searchPods` | `searchPodsDetailed` | `PodSummary` | `PodDetails` |
+| ConfigMap | `searchConfigMaps` | `searchConfigMapsDetailed` | `ResourceSummary` | `ConfigMapDetails` |
+| Service | `searchServices` | `searchServicesDetailed` | `ResourceSummary` | `ServiceDetails` |
+| Deployment | `searchDeployments` | `searchDeploymentsDetailed` | `ResourceSummary` | `DeploymentDetails` |
+| StatefulSet | `searchStatefulSets` | `searchStatefulSetsDetailed` | `ResourceSummary` | `StatefulSetDetails` |
+| DaemonSet | `searchDaemonSets` | `searchDaemonSetsDetailed` | `ResourceSummary` | `DaemonSetDetails` |
+| ReplicaSet | `searchReplicaSets` | `searchReplicaSetsDetailed` | `ResourceSummary` | `ReplicaSetDetails` |
+| Job | `searchJobs` | `searchJobsDetailed` | `ResourceSummary` | `JobDetails` |
+| CronJob | `searchCronJobs` | `searchCronJobsDetailed` | `ResourceSummary` | `CronJobDetails` |
+| Ingress | `searchIngresses` | `searchIngressesDetailed` | `ResourceSummary` | `IngressDetails` |
+| PersistentVolumeClaim | `searchPersistentVolumeClaims` | `searchPersistentVolumeClaimsDetailed` | `ResourceSummary` | `PersistentVolumeClaimDetails` |
+| Secret | `searchSecrets` | `searchSecretsDetailed` | `ResourceSummary` | `SecretDetails` |
+| ServiceAccount | `searchServiceAccounts` | `searchServiceAccountsDetailed` | `ResourceSummary` | `ServiceAccountDetails` |
+| NetworkPolicy | `searchNetworkPolicies` | `searchNetworkPoliciesDetailed` | `ResourceSummary` | `NetworkPolicyDetails` |
 
 其他命名空间资源或 CRD 使用通用方法，必须显式提供正确的资源定义：
 
@@ -78,18 +83,56 @@ List<ResourceDetails> details = client.searchResourcesDetailed(widgets, "demo");
 | `getData()` / `getBinaryData()` | ConfigMap/Secret 数据，base64 值保持编码，不自动解码 |
 | `toJson()` | 完整 Gson `JsonObject`，包含 type、immutable 及自定义/未知字段 |
 
-对象类型的 getter 返回独立 `JsonObject` 副本，缺失时为空对象；字符串缺失时返回 null。返回 JSON 的修改不会影响同一结果的后续读取。使用具体字段前仍需检查是否存在，例如 Pending Pod 可能还没有 podIP：
+公共基类只包含元数据和原有的 JSON 入口，不加入 Pod 或 Service 专属 getter；ConfigMap 不会读取 Pod 状态。新增 `getGeneration()`、`getFinalizers()`、`getOwnerReferences()` 分别读取 metadata 中的代数、终结器和属主引用。
+
+子类的字符串、数值和布尔字段缺失时为 `null`；数值与布尔值使用包装类型，明确区分“未上报”和 `0` / `false`。List/Map 缺失时为空且不可修改；JSON 对象/数组返回独立副本，缺失时为空。修改副本不影响后续 getter。不会将 Pod 创建时间代替启动时间，也不会为读取 getter 发起额外网络请求。Pending Pod 可能还没有 IP、节点或启动时间。
 
 ```java
-for (ResourceDetails pod : client.searchPodsDetailed("nginx")) {
-    com.google.gson.JsonObject status = pod.getStatus();
-    String phase = status.has("phase") ? status.get("phase").getAsString() : "Unknown";
-    System.out.println(pod.getNamespace() + "/" + pod.getName() + " phase=" + phase);
-    // pod.getSpec().getAsJsonArray("containers")：名称、镜像、端口、资源要求等。
+for (PodDetails pod : client.searchPodsDetailed("nginx")) {
+    System.out.println(pod.getNamespace() + "/" + pod.getPodName()
+            + " podIP=" + pod.getPodIP() + " hostIP=" + pod.getHostIP()
+            + " node=" + pod.getNodeName() + " startTime=" + pod.getStartTime()
+            + " phase=" + pod.getPhase() + " containers=" + pod.getContainerNames());
+    for (com.iskycc.k8s.api.model.ContainerStatusDetails container : pod.getContainerStatuses()) {
+        System.out.println(container.getName() + " ready=" + container.getReady()
+                + " restarts=" + container.getRestartCount()
+                + " state=" + container.getState().getType()
+                + " startedAt=" + container.getStartedAt());
+    }
 }
-// service.getSpec().getAsJsonArray("ports")：port、targetPort、protocol 等。
-// config.getData()：ConfigMap 键值。避免将配置内容或 Secret 正文写入日志。
+// ServiceDetails：service.getPorts().get(0).getPort() / getTargetPort() / getNodePort()
+// ConfigMapDetails：config.getDataMap().get("application.yaml")，无需解析 JSON。
+// 避免将配置内容、Secret 数据、容器环境变量、命令或错误 message 写入日志。
 ```
+
+### 各资源的常用 getter
+
+| 详细类型 | 常用直接读取方法 |
+| --- | --- |
+| `PodDetails` | `getPodName`、`getPodIP/getPodIPs`、`getHostIP/getHostIPs`、`getNodeName`、`getStartTime`、`getPhase`、`getReason/getMessage`、`getQosClass`、`getServiceAccountName`、`getContainerNames/getInitContainerNames/getEphemeralContainerNames`、`getContainers/getInitContainers/getEphemeralContainers`、`getContainerStatuses/getInitContainerStatuses/getEphemeralContainerStatuses`、`getConditions`、`getVolumes`、`getNodeSelector`、`getAffinity`、`getTolerations` |
+| `ConfigMapDetails` | `getDataMap`、`getBinaryDataMap`、`getImmutable` |
+| `SecretDetails` | `getType`、`getDataMap`、`getImmutable`；base64 值保持编码 |
+| `ServiceDetails` | `getType`、`getClusterIP/getClusterIPs`、`getExternalIPs/getExternalName`、`getSelector`、`getPorts`、`getLoadBalancerIPs/getLoadBalancerHostnames`、流量策略和 IP family |
+| `DeploymentDetails` | `getReplicas`（期望）、`getCurrentReplicas`（status.replicas）、`getReadyReplicas/getAvailableReplicas/getUnavailableReplicas/getUpdatedReplicas`、`getPaused/getStrategy` |
+| `StatefulSetDetails` | `getReplicas`（期望）、`getObservedReplicas`（status.replicas）、`getCurrentReplicas`（当前修订）、就绪/可用/更新副本、`getCurrentRevision/getUpdateRevision`、`getServiceName`、`getVolumeClaimTemplates` |
+| `DaemonSetDetails` | `getDesiredNumberScheduled/getCurrentNumberScheduled`、`getNumberReady/getNumberAvailable/getNumberUnavailable/getNumberMisscheduled`、`getUpdatedNumberScheduled/getUpdateStrategy` |
+| `ReplicaSetDetails` | `getReplicas/getCurrentReplicas/getReadyReplicas/getAvailableReplicas/getFullyLabeledReplicas` |
+| `JobDetails` | `getParallelism/getCompletions/getBackoffLimit`、`getActive/getSucceeded/getFailed/getReady`、`getStartTime/getCompletionTime`、`getSuspend/getActiveDeadlineSeconds` |
+| `CronJobDetails` | `getSchedule/getTimeZone/getConcurrencyPolicy/getSuspend`、`getLastScheduleTime/getLastSuccessfulTime`、`getActiveJobs/getJobTemplate/getContainerNames/getContainers` |
+| `IngressDetails` | `getIngressClassName/getHosts/getRules/getTls/getDefaultBackend`、`getLoadBalancerIPs/getLoadBalancerHostnames` |
+| `PersistentVolumeClaimDetails` | `getPhase/getVolumeName/getStorageClassName/getVolumeMode/getAccessModes`、`getRequestedStorage/getCapacityStorage/getConditions`；容量保持 `1Gi` 等 quantity 字符串 |
+| `ServiceAccountDetails` | `getAutomountServiceAccountToken/getSecretNames/getImagePullSecretNames/getSecrets` |
+| `NetworkPolicyDetails` | `getPodSelector/getMatchLabels/getPolicyTypes/getIngress/getEgress` |
+
+`WorkloadDetails` 提供 `getTemplate/getSelector/getMatchLabels/getObservedGeneration/getConditions/getContainerNames/getContainers/getInitContainers/getImages`。这些容器来自 Pod 模板，不代表实际运行状态；CronJob 使用自己更深一层的 Job 模板路径。
+
+`ContainerDetails` 可直接读取名称、镜像、拉取策略、工作目录、command/args、资源 requests/limits；端口、env/envFrom、挂载和探针保留 JSON。`ContainerStatusDetails` 提供 name、ready、started、restartCount、imageID、containerID，以及当前 `getState()` 和上一次 `getLastState()`；两者返回 `ContainerStateDetails`，可继续获取 type（waiting/running/terminated）、reason、message、startedAt、finishedAt、exitCode。容器失败后重启时不会把上一次退出码混入当前状态。
+
+`getStartTime()` 对应 Pod 的 `status.startTime`，表示 Kubelet 接受 Pod 的时间；容器启动时间使用 `container.getStartedAt()`，与资源创建时间 `getCreationTimestamp()` 分开。[字段定义见 Kubernetes Pod API](https://kubernetes.io/docs/reference/kubernetes-api/core/pod-v1/)。`ResourceCondition.getStatus()` 保留 `True/False/Unknown`；`ServicePortDetails.getTargetPort()` 将端口名或数值都表示为 String，不丢失命名端口。
+
+未提供专属 getter 的字段继续通过 `getSpec()`、`getStatus()`、`toJson()` 读取，未知字段完整保留。通用查询得到 `ResourceDetails` 后，已确认类型是 Pod 时也可使用 `new PodDetails(resource.toJson())` 创建具体视图；不要把任意 CRD 当成 Pod。
+
+`searchPodsDetailed` 的结果还绑定原客户端，选定一个 Pod 后可直接 `K8sTools.execShell(pod, "ls -al /tmp")` 或 `pod.exec(...)`，无需再次初始化；多容器需指定 `PodExecOptions.container`。手动创建/JSON 重建的 PodDetails 只含数据，需显式 `client.exec(pod, ...)`。绑定不进入 JSON 或日志，刷新客户端后需要重新查询，详见 [PodDetails 执行](pod-exec.md#pod-details-exec)。
 
 `toString()` 只显示资源身份；对对象进行 JSON 序列化或调用 `toJson()` 会包含详细数据。详细结果是查询快照，写入时仍需遵守 [resourceVersion 与并发更新规则](library-api.md#创建读取修改删除示例)。
 
@@ -111,7 +154,7 @@ ListOptions options = ListOptions.builder()
         .limit(100)
         .build();
 List<PodSummary> pods = client.searchPods("nginx", options);
-List<ResourceDetails> detailedPods = client.searchPodsDetailed("nginx", options);
+List<PodDetails> detailedPods = client.searchPodsDetailed("nginx", options);
 ```
 
 导入 `com.iskycc.k8s.api.ListOptions`。字段选择器是否支持取决于对应的资源和 API Server，不能把 Pod 的 `status.phase` 选择器直接套给其他资源。

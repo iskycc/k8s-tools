@@ -3,6 +3,8 @@ package com.iskycc.k8s.api;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.iskycc.k8s.K8sLogging;
+import com.iskycc.k8s.K8sTools;
+import com.iskycc.k8s.api.model.PodDetails;
 import com.iskycc.k8s.ssh.SshConfig;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
@@ -132,6 +134,25 @@ public class PodExecSshFallbackTest {
         }
         assertEquals(1, api.getRequestCount()); assertEquals("/version", api.takeRequest().getUrl().encodedPath());
         assertEquals(2, commands.get()); assertNull(handlerError.get());
+    }
+
+    @Test public void boundPodDetailsRetainsSshVersionRoutingAndOptions() throws Exception {
+        api.enqueue(new MockResponse.Builder().body("{\"items\":[{\"metadata\":{\"namespace\":\"team\",\"name\":\"web\"},"
+                + "\"spec\":{\"containers\":[{\"name\":\"app\"}]}}]}").build());
+        version("v1.30.1"); exit = 7;
+        PodDetails pod = client().searchPodsDetailed("web").get(0);
+        PodExecResult result = K8sTools.execShell(pod, "printf test");
+        assertEquals(7, result.getExitCode()); assertEquals("result中", result.getStdout());
+        assertEquals("diagnostic", result.getStderr());
+        assertTrue(command.contains("--container='app'"));
+        assertTrue(command.contains("'team'")); assertTrue(command.contains("'web'"));
+        assertEquals("/api/v1/pods", api.takeRequest().getUrl().encodedPath());
+        assertEquals("/version", api.takeRequest().getUrl().encodedPath());
+        assertEquals(2, api.getRequestCount()); assertEquals(1, commands.get());
+        PodExecException error = assertThrows(PodExecException.class, () -> pod.exec(
+                PodExecOptions.builder().transport(PodExecOptions.Transport.SSH).maxOutputBytes(2).build(), "date"));
+        assertEquals(PodExecException.Reason.OUTPUT_LIMIT, error.getFailureReason());
+        assertEquals(2, api.getRequestCount()); assertEquals(2, commands.get());
     }
 
     @Test public void newVersionUsesOnlyWebsocketAndExplicitModesSkipVersion() {

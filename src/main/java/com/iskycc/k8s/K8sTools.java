@@ -1,6 +1,9 @@
 package com.iskycc.k8s;
 
 import com.iskycc.k8s.api.K8sApiClient;
+import com.iskycc.k8s.api.PodExecOptions;
+import com.iskycc.k8s.api.PodExecResult;
+import com.iskycc.k8s.api.model.PodDetails;
 import com.iskycc.k8s.ssh.ServiceTokenFetcher;
 
 /**
@@ -10,6 +13,26 @@ import com.iskycc.k8s.ssh.ServiceTokenFetcher;
  */
 public final class K8sTools {
     private K8sTools() { }
+
+    /** 直接用查询结果执行 argv，复用该 PodDetails 绑定的客户端。 */
+    public static PodExecResult exec(PodDetails pod, String... command) {
+        return exec(pod, PodExecOptions.builder().build(), command);
+    }
+
+    public static PodExecResult exec(PodDetails pod, PodExecOptions options, String... command) {
+        if (pod == null) { throw new IllegalArgumentException("pod is required"); }
+        return pod.exec(options, command);
+    }
+
+    /** 直接用查询结果执行整条 shell 命令，不需要再次 init。 */
+    public static PodExecResult execShell(PodDetails pod, String command) {
+        return execShell(pod, PodExecOptions.builder().build(), command);
+    }
+
+    public static PodExecResult execShell(PodDetails pod, PodExecOptions options, String command) {
+        if (pod == null) { throw new IllegalArgumentException("pod is required"); }
+        return pod.execShell(options, command);
+    }
 
     /**
      * 初始化目标集群：优先复用 Redis 缓存，未命中时通过密码 SSH 获取凭据与 API 地址。

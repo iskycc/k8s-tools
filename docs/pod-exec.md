@@ -1,10 +1,58 @@
 # 在 Pod 容器中执行命令
 
-从 **`1.5.5`** 起提供 `K8sApiClient.exec` / `execShell`、版本判断及 SSH 回退。业务项目引用 `io.github.iskycc:k8s-tools:1.6.1`，配置见 [Maven 指南](maven-usage.md)；`1.5.2` 不含这些接口。从源码构建时可执行 `mvn clean install` 并引用本地 `1.6.1-SNAPSHOT`，本次不发布该快照。
+从 **`1.5.5`** 起提供 `K8sApiClient.exec` / `execShell`、版本判断及 SSH 回退。业务项目引用 `io.github.iskycc:k8s-tools:1.6.2`，配置见 [Maven 指南](maven-usage.md)；`1.5.2` 不含这些接口。从源码构建时可执行 `mvn clean install` 并引用本地 `1.6.2-SNAPSHOT`，本次不发布该快照。
 
 需要先通过关键词查找 Pod，再执行命令或容器内测试脚本时，参见[完整 main 示例](examples/pod-search-exec.md)与 [Java 源码](examples/K8sPodSearchExecExample.java)。
 
 ## 最小调用
+
+<a id="pod-details-exec"></a>
+
+### 直接传入 PodDetails（1.6.2 起）
+
+`searchPodsDetailed` 返回的 `PodDetails` 已绑定查询它的客户端。初始化并查询一次后，执行命令只需该对象和命令，不再配置 SSH、Redis、API 地址或 token：
+
+```java
+import com.iskycc.k8s.K8sTools;
+import com.iskycc.k8s.api.model.PodDetails;
+import com.iskycc.k8s.api.PodExecResult;
+import java.util.List;
+
+List<PodDetails> matches = tools.searchPodsDetailed("my-pod"); // tools 是已初始化的 K8sApiClient
+if (matches.size() != 1) {
+    throw new IllegalStateException("请先从匹配结果中选定唯一 Pod");
+}
+PodDetails pod = matches.get(0);
+PodExecResult result = K8sTools.execShell(pod, "ls -al /tmp");
+System.out.print(result.getStdout());
+System.err.print(result.getStderr());
+System.out.println(result.getExitCode());
+```
+
+以下是同一能力的不同入口，选择一种调用即可，每次调用都会实际执行一次：
+
+```java
+K8sTools.exec(pod, "ls", "-al", "/tmp");
+pod.exec("ls", "-al", "/tmp");
+tools.exec(pod, "ls", "-al", "/tmp");
+// 整条字符串使用 K8sTools.execShell(pod, command)、pod.execShell(command) 或 tools.execShell(pod, command)。
+```
+
+只有一个普通容器时自动选定它；多容器、或快照没有容器定义时必须显式指定，**不会默认选择 sidecar，也不会沿用 kubectl 的默认容器注解**。可以用 `pod.getContainerNames()` 查看名称，传入 `PodExecOptions`：
+
+```java
+PodExecOptions options = PodExecOptions.builder().container("app").timeoutMs(60000).build();
+PodExecResult result = K8sTools.execShell(pod, options, "ls -al /tmp");
+// pod.exec(options, "ls", "-al", "/tmp") 和 tools.exec(pod, options, ...) 同样支持。
+```
+
+显式容器名会与已知的普通/init/ephemeral 容器名校验；容器是否正在运行、是否允许 exec 仍由服务端决定。不额外 GET Pod，不强制过滤 Pod phase，不重放失败请求。旧的 namespace/podName 重载保持原有容器选择行为。
+
+客户端绑定仅保存在内存，`toJson()`、Gson 序列化和 `toString()` 不含客户端凭据。手动 `new PodDetails(json)` 或从 JSON 重新创建的对象没有绑定，直接 `pod.exec` 会明确报错；可用已有 `tools.exec(pod, ...)` 显式指定目标。已绑定的 Pod 传给另一个客户端会被拒绝，即使两个客户端的 URL 相同。刷新凭据后，应通过新客户端重新查询 Pod，再执行命令；旧对象继续使用原客户端。
+
+自动版本选择、WebSocket/SSH、严格 TLS、输出上限、总超时、退出码和错误处理沿用下文规则。绑定不保存全局集群，也不重新初始化 Redis/SSH 凭据；实际 SSH Exec 仍会建立一次独立 SSH 连接。资源以 namespace/name 寻址，快照不能保证同名 Pod 后续未被替换。
+
+### 使用 namespace 和 podName
 
 ```java
 import com.iskycc.k8s.api.K8sApiClient;

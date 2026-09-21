@@ -7,6 +7,8 @@ import com.google.gson.JsonParser;
 import com.iskycc.k8s.K8sLogging;
 import com.iskycc.k8s.K8sToolsException;
 import com.iskycc.k8s.api.model.PodSummary;
+import com.iskycc.k8s.api.model.PodDetails;
+import com.iskycc.k8s.api.model.ServiceDetails;
 import com.iskycc.k8s.api.model.ResourceDetails;
 import com.iskycc.k8s.api.model.ResourceSummary;
 import com.iskycc.k8s.mock.MockK8sApiServer;
@@ -104,18 +106,25 @@ public class ResourceSearchTest {
         service.add("spec", json("{\"type\":\"NodePort\",\"clusterIP\":\"10.0.0.1\",\"ports\":[{\"port\":80,\"targetPort\":\"http\",\"nodePort\":30080}],\"selector\":{\"app\":\"web\"}}"));
         service.add("status", json("{\"loadBalancer\":{\"ingress\":[{\"ip\":\"192.0.2.1\"}]}}"));
         page("1", "", service);
-        ResourceDetails details = client.searchServicesDetailed("web").get(0);
+        ServiceDetails details = client.searchServicesDetailed("web").get(0);
+        assertEquals("NodePort", details.getType());
+        assertEquals("http", details.getPorts().get(0).getTargetPort());
         assertEquals("http", details.getSpec().getAsJsonArray("ports").get(0).getAsJsonObject().get("targetPort").getAsString());
         assertTrue(details.getStatus().has("loadBalancer"));
         details.getSpec().addProperty("type", "changed");
         assertEquals("NodePort", details.getSpec().get("type").getAsString());
         JsonObject pod = resource("Pod", "b", "web");
         pod.add("spec", json("{\"nodeName\":\"node-1\",\"containers\":[{\"name\":\"app\",\"image\":\"busybox\"}]}"));
-        pod.add("status", json("{\"phase\":\"Running\",\"podIP\":\"10.1.0.1\",\"containerStatuses\":[{\"name\":\"app\",\"ready\":true}]}"));
+        pod.add("status", json("{\"phase\":\"Running\",\"podIP\":\"10.1.0.1\",\"hostIP\":\"192.0.2.1\","
+                + "\"startTime\":\"2026-09-21T00:00:00Z\",\"containerStatuses\":[{\"name\":\"app\",\"ready\":true}]}"));
         page("1", "", pod);
-        ResourceDetails p = client.searchPodsDetailed("web").get(0);
-        assertEquals("node-1", p.getSpec().get("nodeName").getAsString());
-        assertEquals("10.1.0.1", p.getStatus().get("podIP").getAsString());
+        PodDetails p = client.searchPodsDetailed("web").get(0);
+        assertEquals("node-1", p.getNodeName());
+        assertEquals("10.1.0.1", p.getPodIP());
+        assertEquals("192.0.2.1", p.getHostIP());
+        assertEquals("2026-09-21T00:00:00Z", p.getStartTime());
+        assertEquals(Collections.singletonList("app"), p.getContainerNames());
+        assertTrue(p.getContainerStatuses().get(0).getReady());
     }
 
     @Test public void collectionItemsWithoutTypeFieldsUseExplicitResourceDefinition() {
@@ -168,6 +177,10 @@ public class ResourceSearchTest {
                 {"Secrets", "/api/v1/secrets"}, {"ServiceAccounts", "/api/v1/serviceaccounts"},
                 {"NetworkPolicies", "/apis/networking.k8s.io/v1/networkpolicies"}
         };
+        String[] detailTypes = {"PodDetails", "ConfigMapDetails", "ServiceDetails", "DeploymentDetails",
+                "StatefulSetDetails", "DaemonSetDetails", "ReplicaSetDetails", "JobDetails", "CronJobDetails",
+                "IngressDetails", "PersistentVolumeClaimDetails", "SecretDetails", "ServiceAccountDetails", "NetworkPolicyDetails"};
+        int routeIndex = 0;
         for (String[] route : routes) {
             for (String suffix : Arrays.asList("", "Detailed")) {
                 for (boolean options : Arrays.asList(false, true)) {
@@ -176,6 +189,10 @@ public class ResourceSearchTest {
                             .invoke(client, "target", ListOptions.builder().limit(1).build())
                             : K8sApiClient.class.getMethod("search" + route[0] + suffix, String.class).invoke(client, "target");
                     assertEquals(2, ((List<?>) result).size());
+                    if (!suffix.isEmpty()) {
+                        assertEquals(detailTypes[routeIndex], ((List<?>) result).get(0).getClass().getSimpleName());
+                        assertEquals("Fixture", ((ResourceDetails) ((List<?>) result).get(0)).getKind());
+                    }
                     MockK8sApiServer.RecordedRequest request = server.getRequests().get(server.getRequestCount() - 1);
                     assertEquals(route[1], request.path); assertEquals("GET", request.method); assertEquals("", request.body);
                     if (suffix.isEmpty() && !"Pods".equals(route[0])) {
@@ -184,6 +201,7 @@ public class ResourceSearchTest {
                     }
                 }
             }
+            routeIndex++;
         }
         assertEquals(56, server.getRequestCount());
     }

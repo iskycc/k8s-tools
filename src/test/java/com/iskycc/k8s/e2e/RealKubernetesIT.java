@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.iskycc.k8s.K8sToolsException;
+import com.iskycc.k8s.K8sTools;
 import com.iskycc.k8s.api.DeleteOptions;
 import com.iskycc.k8s.api.K8sApiClient;
 import com.iskycc.k8s.api.K8sApiException;
@@ -18,7 +19,10 @@ import com.iskycc.k8s.api.ResourceDefinition;
 import com.iskycc.k8s.api.WriteOptions;
 import com.iskycc.k8s.api.model.K8sList;
 import com.iskycc.k8s.api.model.PodSummary;
-import com.iskycc.k8s.api.model.ResourceDetails;
+import com.iskycc.k8s.api.model.PodDetails;
+import com.iskycc.k8s.api.model.ConfigMapDetails;
+import com.iskycc.k8s.api.model.ServiceDetails;
+import com.iskycc.k8s.api.model.DeploymentDetails;
 import com.iskycc.k8s.api.model.ResourceSummary;
 import com.iskycc.k8s.ssh.ServiceTokenFetcher;
 import com.iskycc.k8s.ssh.SshConfig;
@@ -35,6 +39,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -42,6 +47,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -108,27 +114,34 @@ public class RealKubernetesIT {
             List<PodSummary> pods = client.searchPods(name, options);
             assertSearchIdentities(pods, name, secondNamespace);
             for (PodSummary pod : pods) { assertEquals(Arrays.asList("app", "sidecar"), pod.getContainerNames()); }
-            List<ResourceDetails> podDetails = client.searchPodsDetailed(name, options);
+            List<PodDetails> podDetails = client.searchPodsDetailed(name, options);
             assertSearchIdentities(podDetails, name, secondNamespace);
-            for (ResourceDetails pod : podDetails) {
-                assertEquals(2, pod.getSpec().getAsJsonArray("containers").size());
+            for (PodDetails pod : podDetails) {
+                assertEquals(Arrays.asList("app", "sidecar"), pod.getContainerNames());
+                assertEquals(2, pod.getContainers().size());
+                assertEquals("registry.k8s.io/pause:3.10", pod.getContainers().get(0).getImage());
                 assertEquals("Pod", pod.getKind());
                 assertTrue(pod.getResourceVersion() != null);
             }
             assertSearchIdentities(client.searchConfigMaps(name, options), name, secondNamespace);
-            List<ResourceDetails> maps = client.searchConfigMapsDetailed(name, options);
+            List<ConfigMapDetails> maps = client.searchConfigMapsDetailed(name, options);
             assertSearchIdentities(maps, name, secondNamespace);
-            for (ResourceDetails map : maps) { assertEquals("enabled", map.getData().get("setting").getAsString()); }
+            for (ConfigMapDetails map : maps) { assertEquals("enabled", map.getDataMap().get("setting")); }
             assertSearchIdentities(client.searchServices(name, options), name, secondNamespace);
-            List<ResourceDetails> services = client.searchServicesDetailed(name, options);
+            List<ServiceDetails> services = client.searchServicesDetailed(name, options);
             assertSearchIdentities(services, name, secondNamespace);
-            for (ResourceDetails service : services) {
-                assertEquals(80, service.getSpec().getAsJsonArray("ports").get(0).getAsJsonObject().get("port").getAsInt());
+            for (ServiceDetails service : services) {
+                assertEquals(Integer.valueOf(80), service.getPorts().get(0).getPort());
+                assertEquals("8080", service.getPorts().get(0).getTargetPort());
+                assertNotNull(service.getClusterIP());
             }
             assertSearchIdentities(client.searchDeployments(name, options), name, secondNamespace);
-            List<ResourceDetails> deployments = client.searchDeploymentsDetailed(name, options);
+            List<DeploymentDetails> deployments = client.searchDeploymentsDetailed(name, options);
             assertSearchIdentities(deployments, name, secondNamespace);
-            for (ResourceDetails deployment : deployments) { assertEquals(0, deployment.getSpec().get("replicas").getAsInt()); }
+            for (DeploymentDetails deployment : deployments) {
+                assertEquals(Integer.valueOf(0), deployment.getReplicas());
+                assertEquals(Collections.singletonList("app"), deployment.getContainerNames());
+            }
             assertTrue(client.searchPods(name + "-absent", options).isEmpty());
         } finally {
             client.namespaces().deleteIfExists(secondNamespace, DeleteOptions.builder()
@@ -171,6 +184,16 @@ public class RealKubernetesIT {
                     .caCertPem(metadata.get("caCertPem").getAsString()).tlsAutoFallback(false).build();
         }
         PodExecOptions main = PodExecOptions.builder().container("main").build();
+        PodDetails selected = direct.searchPodsDetailed("exec-target").stream()
+                .filter(pod -> namespace.equals(pod.getNamespace())).findFirst().get();
+        assertNotNull(selected.getPodIP()); assertNotNull(selected.getHostIP());
+        assertNotNull(selected.getStartTime()); assertNotNull(selected.getNodeName());
+        assertEquals(Arrays.asList("main", "sidecar"), selected.getContainerNames());
+        assertThrows(IllegalArgumentException.class, () -> selected.exec("date"));
+        assertEquals("bound", K8sTools.exec(selected, main, "printf", "%s", "bound").getStdout());
+        assertEquals("sidecar\n", selected.execShell(PodExecOptions.builder().container("sidecar").build(),
+                "printenv CONTAINER_NAME").getStdout());
+        assertEquals("client", direct.exec(selected, main, "printf", "%s", "client").getStdout());
         PodExecResult literal = direct.exec(namespace, "exec-target", main, "printf", "%s", "a b;$(echo unsafe)&中文");
         assertEquals(0, literal.getExitCode());
         assertEquals("a b;$(echo unsafe)&中文", literal.getStdout());
@@ -200,6 +223,9 @@ public class RealKubernetesIT {
         // fromSsh 必须保留配置；显式 SSH 在新集群上验证真实 kubectl 执行路径。
         PodExecOptions sshExec = PodExecOptions.builder().container("main")
                 .transport(PodExecOptions.Transport.SSH).build();
+        PodDetails sshPod = client.searchPodsDetailed("exec-target").stream()
+                .filter(pod -> namespace.equals(pod.getNamespace())).findFirst().get();
+        assertEquals("bound-ssh", K8sTools.exec(sshPod, sshExec, "printf", "%s", "bound-ssh").getStdout());
         assertEquals("a b;$(echo unsafe)&中文", client.exec(namespace, "exec-target", sshExec,
                 "printf", "%s", "a b;$(echo unsafe)&中文").getStdout());
         PodExecResult sshFailure = client.execShell(namespace, "exec-target", sshExec,

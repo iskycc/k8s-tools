@@ -1,0 +1,207 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "namespace": "team",
+    "name": "web",
+    "uid": "pod-id",
+    "generation": 3,
+    "creationTimestamp": "2026-09-21T00:00:00Z",
+    "labels": {
+      "app": "web"
+    },
+    "finalizers": [
+      "example.com/cleanup"
+    ],
+    "ownerReferences": [
+      {
+        "apiVersion": "apps/v1",
+        "kind": "ReplicaSet",
+        "name": "web-rs",
+        "uid": "rs-id"
+      }
+    ]
+  },
+  "spec": {
+    "nodeName": "worker-a",
+    "serviceAccountName": "reader",
+    "restartPolicy": "Always",
+    "schedulerName": "default-scheduler",
+    "priority": 0,
+    "hostNetwork": false,
+    "dnsPolicy": "ClusterFirst",
+    "terminationGracePeriodSeconds": 30,
+    "nodeSelector": {
+      "kubernetes.io/os": "linux"
+    },
+    "containers": [
+      {
+        "name": "app",
+        "image": "example/app:v1",
+        "imagePullPolicy": "IfNotPresent",
+        "workingDir": "/app",
+        "command": [
+          "/bin/sh",
+          "-c"
+        ],
+        "args": [
+          "private-command"
+        ],
+        "env": [
+          {
+            "name": "PASSWORD",
+            "value": "private-password"
+          }
+        ],
+        "ports": [
+          {
+            "name": "http",
+            "containerPort": 8080
+          }
+        ],
+        "resources": {
+          "requests": {
+            "cpu": "100m",
+            "memory": "64Mi"
+          },
+          "limits": {
+            "cpu": "1",
+            "memory": "128Mi"
+          }
+        },
+        "volumeMounts": [
+          {
+            "name": "data",
+            "mountPath": "/data"
+          }
+        ],
+        "readinessProbe": {
+          "httpGet": {
+            "path": "/ready",
+            "port": 8080
+          }
+        }
+      },
+      {
+        "name": "sidecar",
+        "image": "example/proxy:v2"
+      }
+    ],
+    "initContainers": [
+      {
+        "name": "init",
+        "image": "example/init:v1"
+      }
+    ],
+    "ephemeralContainers": [
+      {
+        "name": "debugger",
+        "image": "example/debug:v1"
+      }
+    ],
+    "volumes": [
+      {
+        "name": "data",
+        "emptyDir": {}
+      }
+    ]
+  },
+  "status": {
+    "phase": "Running",
+    "podIP": "10.1.0.7",
+    "podIPs": [
+      {
+        "ip": "10.1.0.7"
+      },
+      {
+        "ip": "2001:db8::7"
+      }
+    ],
+    "hostIP": "192.0.2.7",
+    "hostIPs": [
+      {
+        "ip": "192.0.2.7"
+      },
+      {
+        "ip": "2001:db8::10"
+      }
+    ],
+    "startTime": "2026-09-21T00:00:01Z",
+    "qosClass": "Burstable",
+    "conditions": [
+      {
+        "type": "Ready",
+        "status": "True",
+        "lastTransitionTime": "2026-09-21T00:00:03Z"
+      },
+      {
+        "type": "Example",
+        "status": "Unknown"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "app",
+        "image": "example/app:v1",
+        "imageID": "sha256:abc",
+        "containerID": "containerd://123",
+        "ready": true,
+        "started": true,
+        "restartCount": 2,
+        "state": {
+          "running": {
+            "startedAt": "2026-09-21T00:00:03Z"
+          }
+        },
+        "lastState": {
+          "terminated": {
+            "exitCode": 137,
+            "reason": "OOMKilled",
+            "message": "private-message",
+            "startedAt": "2026-09-21T00:00:02Z",
+            "finishedAt": "2026-09-21T00:00:03Z"
+          }
+        }
+      },
+      {
+        "name": "sidecar",
+        "ready": false,
+        "restartCount": 0,
+        "state": {
+          "waiting": {
+            "reason": "ImagePullBackOff",
+            "message": "private-registry"
+          }
+        }
+      }
+    ],
+    "initContainerStatuses": [
+      {
+        "name": "init",
+        "ready": true,
+        "restartCount": 0,
+        "state": {
+          "terminated": {
+            "exitCode": 0,
+            "reason": "Completed"
+          }
+        }
+      }
+    ],
+    "ephemeralContainerStatuses": [
+      {
+        "name": "debugger",
+        "ready": false,
+        "state": {
+          "terminated": {
+            "exitCode": 1,
+            "reason": "Error"
+          }
+        }
+      }
+    ]
+  },
+  "futureField": {
+    "unknown": "kept"
+  }
+}

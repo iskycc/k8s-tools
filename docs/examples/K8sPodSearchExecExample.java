@@ -1,13 +1,11 @@
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import com.iskycc.k8s.K8sTools;
 import com.iskycc.k8s.api.K8sApiClient;
 import com.iskycc.k8s.api.K8sApiException;
 import com.iskycc.k8s.api.ListOptions;
 import com.iskycc.k8s.api.PodExecException;
 import com.iskycc.k8s.api.PodExecOptions;
 import com.iskycc.k8s.api.PodExecResult;
-import com.iskycc.k8s.api.model.ResourceDetails;
+import com.iskycc.k8s.api.model.PodDetails;
 import com.iskycc.k8s.ssh.SshConfig;
 
 import java.util.ArrayList;
@@ -15,7 +13,7 @@ import java.util.List;
 
 /**
  * Java 8 示例：SSH/Redis 接入 -> 跨全部 namespace 按名称关键词查找 Pod -> 执行整条 shell 命令。
- * 依赖 io.github.iskycc:k8s-tools:1.6.1，运行说明见 pod-search-exec.md。
+ * 依赖 io.github.iskycc:k8s-tools:1.6.2，运行说明见 pod-search-exec.md。
  * 本文件位于 docs，不进入库的发布包。初始化可能写入 SA/Secret/RBAC。
  */
 public final class K8sPodSearchExecExample {
@@ -60,10 +58,9 @@ public final class K8sPodSearchExecExample {
                     .fromSsh(ssh.build());
 
             // 3. 跨全部 namespace 搜索；执行时使用匹配 Pod 自身的 namespace。
-            JsonObject pod = findPodByKeyword(client, keyword);
-            JsonObject metadata = pod.getAsJsonObject("metadata");
-            String namespace = metadata.get("namespace").getAsString();
-            String podName = metadata.get("name").getAsString();
+            PodDetails pod = findPodByKeyword(client, keyword);
+            String namespace = pod.getNamespace();
+            String podName = pod.getPodName();
             String selectedContainer = selectContainer(pod, container);
             System.err.println("执行目标：" + namespace + "/" + podName + "，容器：" + selectedContainer);
 
@@ -74,7 +71,8 @@ public final class K8sPodSearchExecExample {
                     .timeoutMs(30000) // 长时间运行的测试用例可适当调大。
                     .maxOutputBytes(4 * 1024 * 1024)
                     .build();
-            PodExecResult result = client.execShell(namespace, podName, options, command);
+            // PodDetails 已绑定查询客户端，直接传入即可，无需再次初始化或拼装 namespace/name。
+            PodExecResult result = K8sTools.execShell(pod, options, command);
             System.out.print(result.getStdout());
             System.err.print(result.getStderr());
             System.err.println("\n执行退出码：" + result.getExitCode());
@@ -97,23 +95,21 @@ public final class K8sPodSearchExecExample {
     }
 
     /** 跨全部 namespace 自动分页；完整名称优先，同名时可用 namespace/pod 精确选择。 */
-    public static JsonObject findPodByKeyword(K8sApiClient client, String keyword) {
+    public static PodDetails findPodByKeyword(K8sApiClient client, String keyword) {
         if (keyword == null || keyword.trim().isEmpty()) {
             throw new ExampleException("Pod 关键词不能为空");
         }
-        List<JsonObject> matches = new ArrayList<JsonObject>();
-        List<JsonObject> exactMatches = new ArrayList<JsonObject>();
+        List<PodDetails> matches = new ArrayList<PodDetails>();
+        List<PodDetails> exactMatches = new ArrayList<PodDetails>();
         boolean qualifiedName = keyword.indexOf('/') >= 0;
         String nameKeyword = qualifiedName ? keyword.substring(keyword.indexOf('/') + 1) : keyword;
         if (nameKeyword.trim().isEmpty()) { throw new ExampleException("namespace/pod 中的 Pod 名称不能为空"); }
         // SDK 返回所有匹配项；下面的唯一选择与删除过滤仅属于本执行示例。
-        for (ResourceDetails detail : client.searchPodsDetailed(nameKeyword, ListOptions.builder()
+        for (PodDetails pod : client.searchPodsDetailed(nameKeyword, ListOptions.builder()
                 .fieldSelector("status.phase=Running").limit(100).build())) {
-            JsonObject pod = detail.toJson();
-            JsonObject metadata = pod.getAsJsonObject("metadata");
-            if (metadata.has("deletionTimestamp") && !metadata.get("deletionTimestamp").isJsonNull()) { continue; }
-            String name = metadata.get("name").getAsString();
-            String identity = metadata.get("namespace").getAsString() + "/" + name;
+            if (pod.getDeletionTimestamp() != null) { continue; }
+            String name = pod.getPodName();
+            String identity = pod.getNamespace() + "/" + name;
             if (qualifiedName ? identity.equals(keyword) : name.contains(keyword)) {
                 matches.add(pod);
                 if (name.equals(keyword) || identity.equals(keyword)) { exactMatches.add(pod); }
@@ -125,9 +121,8 @@ public final class K8sPodSearchExecExample {
         }
         if (matches.size() > 1) {
             List<String> names = new ArrayList<String>();
-            for (JsonObject pod : matches) {
-                JsonObject metadata = pod.getAsJsonObject("metadata");
-                names.add(metadata.get("namespace").getAsString() + "/" + metadata.get("name").getAsString());
+            for (PodDetails pod : matches) {
+                names.add(pod.getNamespace() + "/" + pod.getPodName());
             }
             throw new ExampleException("匹配到多个 Pod：" + names + "；请把关键词改为其中一个 namespace/pod。");
         }
@@ -135,12 +130,8 @@ public final class K8sPodSearchExecExample {
     }
 
     /** 单容器自动选择；多容器必须明确指定，避免在 sidecar 中执行用例。 */
-    public static String selectContainer(JsonObject pod, String requested) {
-        JsonArray containers = pod.getAsJsonObject("spec").getAsJsonArray("containers");
-        List<String> names = new ArrayList<String>();
-        for (JsonElement item : containers) {
-            names.add(item.getAsJsonObject().get("name").getAsString());
-        }
+    public static String selectContainer(PodDetails pod, String requested) {
+        List<String> names = pod.getContainerNames();
         if (requested != null) {
             if (!names.contains(requested)) {
                 throw new ExampleException("指定容器不在 Pod 中；可用容器：" + names);

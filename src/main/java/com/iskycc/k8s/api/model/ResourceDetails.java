@@ -1,10 +1,9 @@
 package com.iskycc.k8s.api.model;
 
-import com.google.gson.JsonElement;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -12,8 +11,8 @@ import java.util.Map;
  * 返回的 JSON 均为副本，不可用本对象代替写入时所需的版本检查。
  * ConfigMap/Secret 的 data 和正文可能敏感；toString 只展示资源身份。
  */
-public final class ResourceDetails extends ResourceSummary {
-    private final JsonObject resource;
+public class ResourceDetails extends ResourceSummary {
+    final JsonFields fields;
 
     public ResourceDetails(JsonObject resource) {
         this(resource, null, null);
@@ -22,57 +21,41 @@ public final class ResourceDetails extends ResourceSummary {
     /** 列表中的对象可能省略类型字段；搜索入口用明确的资源定义补齐，不覆盖服务端已有值。 */
     public ResourceDetails(JsonObject resource, String defaultApiVersion, String defaultKind) {
         super(identity(resource, "namespace"), identity(resource, "name"));
-        this.resource = resource.deepCopy();
-        fillMissingType("apiVersion", defaultApiVersion);
-        fillMissingType("kind", defaultKind);
+        JsonObject copy = resource.deepCopy();
+        fillMissingType(copy, "apiVersion", defaultApiVersion);
+        fillMissingType(copy, "kind", defaultKind);
+        this.fields = new JsonFields(copy);
     }
 
-    public String getApiVersion() { return string(resource, "apiVersion"); }
-    public String getKind() { return string(resource, "kind"); }
-    public String getUid() { return string(resource.getAsJsonObject("metadata"), "uid"); }
-    public String getResourceVersion() { return string(resource.getAsJsonObject("metadata"), "resourceVersion"); }
-    public String getCreationTimestamp() { return string(resource.getAsJsonObject("metadata"), "creationTimestamp"); }
-    public String getDeletionTimestamp() { return string(resource.getAsJsonObject("metadata"), "deletionTimestamp"); }
-    public Map<String, String> getLabels() { return metadataMap("labels"); }
-    public Map<String, String> getAnnotations() { return metadataMap("annotations"); }
+    public String getApiVersion() { return fields.string("apiVersion"); }
+    public String getKind() { return fields.string("kind"); }
+    public String getUid() { return fields.string("metadata", "uid"); }
+    public String getResourceVersion() { return fields.string("metadata", "resourceVersion"); }
+    public String getCreationTimestamp() { return fields.string("metadata", "creationTimestamp"); }
+    public String getDeletionTimestamp() { return fields.string("metadata", "deletionTimestamp"); }
+    public Long getGeneration() { return fields.longNumber("metadata", "generation"); }
+    public Map<String, String> getLabels() { return fields.stringMap("metadata", "labels"); }
+    public Map<String, String> getAnnotations() { return fields.stringMap("metadata", "annotations"); }
+    public List<String> getFinalizers() { return fields.strings("metadata", "finalizers"); }
+    public JsonArray getOwnerReferences() { return fields.array("metadata", "ownerReferences"); }
 
     /** 完整 metadata 的副本，含 ownerReferences、finalizers 等字段。 */
-    public JsonObject getMetadata() { return object("metadata"); }
+    public JsonObject getMetadata() { return fields.object("metadata"); }
     /** Pod 容器/节点、Service 类型/端口/选择器、工作负载模板等资源规格。缺失时为空对象。 */
-    public JsonObject getSpec() { return object("spec"); }
+    public JsonObject getSpec() { return fields.object("spec"); }
     /** phase、IP、容器状态、就绪副本等服务端状态。缺失时为空对象。 */
-    public JsonObject getStatus() { return object("status"); }
+    public JsonObject getStatus() { return fields.object("status"); }
     /** ConfigMap/Secret 等的 data 副本；Secret 的值保持服务端 base64 编码，不自动解码。 */
-    public JsonObject getData() { return object("data"); }
+    public JsonObject getData() { return fields.object("data"); }
     /** ConfigMap 的 binaryData 副本，保持服务端 base64 编码。 */
-    public JsonObject getBinaryData() { return object("binaryData"); }
+    public JsonObject getBinaryData() { return fields.object("binaryData"); }
     /** 完整资源副本，包含 type、immutable、自定义资源字段等。 */
-    public JsonObject toJson() { return resource.deepCopy(); }
+    public JsonObject toJson() { return fields.object(); }
 
-    private void fillMissingType(String field, String fallback) {
+    private static void fillMissingType(JsonObject resource, String field, String fallback) {
         if (fallback != null && (!resource.has(field) || resource.get(field).isJsonNull())) {
             resource.addProperty(field, fallback);
         }
     }
 
-    private JsonObject object(String field) {
-        JsonElement element = resource.get(field);
-        return element != null && element.isJsonObject() ? element.getAsJsonObject().deepCopy() : new JsonObject();
-    }
-
-    private Map<String, String> metadataMap(String field) {
-        Map<String, String> values = new LinkedHashMap<String, String>();
-        JsonElement element = resource.getAsJsonObject("metadata").get(field);
-        if (element != null && element.isJsonObject()) {
-            for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
-                if (entry.getValue().isJsonPrimitive()) { values.put(entry.getKey(), entry.getValue().getAsString()); }
-            }
-        }
-        return Collections.unmodifiableMap(values);
-    }
-
-    private static String string(JsonObject object, String field) {
-        JsonElement value = object.get(field);
-        return value == null || value.isJsonNull() ? null : value.getAsString();
-    }
 }

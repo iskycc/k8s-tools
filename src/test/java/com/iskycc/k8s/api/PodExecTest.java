@@ -244,7 +244,7 @@ public class PodExecTest {
     }
 
     @Test public void rejectsInvalidInputBeforeOpeningAnyConnection() {
-        assertThrows(IllegalArgumentException.class, () -> client.exec(null, "pod", "date"));
+        assertThrows(IllegalArgumentException.class, () -> client.exec((String) null, "pod", "date"));
         assertThrows(IllegalArgumentException.class, () -> client.exec("default", "../pod", "date"));
         assertThrows(IllegalArgumentException.class, () -> client.exec("default", "pod", new String[0]));
         assertThrows(IllegalArgumentException.class, () -> client.exec("default", "pod", "echo", null));

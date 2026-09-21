@@ -19,6 +19,20 @@ import com.iskycc.k8s.api.model.Pod;
 import com.iskycc.k8s.api.model.PodSummary;
 import com.iskycc.k8s.api.model.ResourceSummary;
 import com.iskycc.k8s.api.model.ResourceDetails;
+import com.iskycc.k8s.api.model.PodDetails;
+import com.iskycc.k8s.api.model.ConfigMapDetails;
+import com.iskycc.k8s.api.model.SecretDetails;
+import com.iskycc.k8s.api.model.ServiceDetails;
+import com.iskycc.k8s.api.model.DeploymentDetails;
+import com.iskycc.k8s.api.model.StatefulSetDetails;
+import com.iskycc.k8s.api.model.DaemonSetDetails;
+import com.iskycc.k8s.api.model.ReplicaSetDetails;
+import com.iskycc.k8s.api.model.JobDetails;
+import com.iskycc.k8s.api.model.CronJobDetails;
+import com.iskycc.k8s.api.model.IngressDetails;
+import com.iskycc.k8s.api.model.PersistentVolumeClaimDetails;
+import com.iskycc.k8s.api.model.ServiceAccountDetails;
+import com.iskycc.k8s.api.model.NetworkPolicyDetails;
 import com.iskycc.k8s.api.model.Service;
 import com.iskycc.k8s.api.model.VersionInfo;
 import com.iskycc.k8s.ssh.MasterInfo;
@@ -141,6 +155,17 @@ public class K8sApiClient {
         return exec(namespace, podName, PodExecOptions.builder().build(), command);
     }
 
+    /** 使用 PodDetails 的 namespace/name；单容器自动选择，多容器需显式 options.container。 */
+    public PodExecResult exec(PodDetails pod, String... command) {
+        return exec(pod, PodExecOptions.builder().build(), command);
+    }
+
+    /** 使用已有客户端，无额外初始化；拒绝从另一个客户端查询得到的 PodDetails。 */
+    public PodExecResult exec(PodDetails pod, PodExecOptions options, String... command) {
+        if (pod == null) { throw new IllegalArgumentException("pod is required"); }
+        return pod.exec(this, options, command);
+    }
+
     /** 指定容器、总超时及输出上限的 Pod Exec。 */
     public PodExecResult exec(String namespace, String podName, PodExecOptions options, String... command) {
         PodExecTransport.validate(namespace, podName, options, command);
@@ -220,6 +245,15 @@ public class K8sApiClient {
     /** 执行整条命令，如 execShell(ns, pod, "ls -al /tmp")；由容器内 /bin/sh -c 解释。 */
     public PodExecResult execShell(String namespace, String podName, String command) {
         return execShell(namespace, podName, PodExecOptions.builder().build(), command);
+    }
+
+    public PodExecResult execShell(PodDetails pod, String command) {
+        return execShell(pod, PodExecOptions.builder().build(), command);
+    }
+
+    public PodExecResult execShell(PodDetails pod, PodExecOptions options, String command) {
+        if (command == null || command.trim().isEmpty()) { throw new IllegalArgumentException("command is required"); }
+        return exec(pod, options, "/bin/sh", "-c", command);
     }
 
     /** shell 文本来自调用方，避免拼接不可信输入；支持与 exec 相同的选项。 */
@@ -348,10 +382,10 @@ public class K8sApiClient {
         return ResourceSearch.search(this, K8sResources.PODS, keyword, options, PodSummary::fromJson);
     }
     /** 跨全部 namespace 搜索 Pod，返回全部详细结果。 */
-    public List<ResourceDetails> searchPodsDetailed(String keyword) { return searchPodsDetailed(keyword, null); }
+    public List<PodDetails> searchPodsDetailed(String keyword) { return searchPodsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchPodsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.PODS, keyword, options);
+    public List<PodDetails> searchPodsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.PODS, keyword, options, item -> new PodDetails(item, this));
     }
 
     /** 跨全部 namespace 搜索 ConfigMap，返回全部简易结果。 */
@@ -361,10 +395,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.CONFIG_MAPS, keyword, options);
     }
     /** 跨全部 namespace 搜索 ConfigMap，返回全部详细结果。 */
-    public List<ResourceDetails> searchConfigMapsDetailed(String keyword) { return searchConfigMapsDetailed(keyword, null); }
+    public List<ConfigMapDetails> searchConfigMapsDetailed(String keyword) { return searchConfigMapsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchConfigMapsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.CONFIG_MAPS, keyword, options);
+    public List<ConfigMapDetails> searchConfigMapsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.CONFIG_MAPS, keyword, options, ConfigMapDetails::new);
     }
 
     /** 跨全部 namespace 搜索 Service，返回全部简易结果。 */
@@ -374,10 +408,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.SERVICES, keyword, options);
     }
     /** 跨全部 namespace 搜索 Service，返回全部详细结果。 */
-    public List<ResourceDetails> searchServicesDetailed(String keyword) { return searchServicesDetailed(keyword, null); }
+    public List<ServiceDetails> searchServicesDetailed(String keyword) { return searchServicesDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchServicesDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.SERVICES, keyword, options);
+    public List<ServiceDetails> searchServicesDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.SERVICES, keyword, options, ServiceDetails::new);
     }
 
     /** 跨全部 namespace 搜索 Deployment，返回全部简易结果。 */
@@ -387,10 +421,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.DEPLOYMENTS, keyword, options);
     }
     /** 跨全部 namespace 搜索 Deployment，返回全部详细结果。 */
-    public List<ResourceDetails> searchDeploymentsDetailed(String keyword) { return searchDeploymentsDetailed(keyword, null); }
+    public List<DeploymentDetails> searchDeploymentsDetailed(String keyword) { return searchDeploymentsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchDeploymentsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.DEPLOYMENTS, keyword, options);
+    public List<DeploymentDetails> searchDeploymentsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.DEPLOYMENTS, keyword, options, DeploymentDetails::new);
     }
 
     /** 跨全部 namespace 搜索 StatefulSet，返回全部简易结果。 */
@@ -400,10 +434,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.STATEFUL_SETS, keyword, options);
     }
     /** 跨全部 namespace 搜索 StatefulSet，返回全部详细结果。 */
-    public List<ResourceDetails> searchStatefulSetsDetailed(String keyword) { return searchStatefulSetsDetailed(keyword, null); }
+    public List<StatefulSetDetails> searchStatefulSetsDetailed(String keyword) { return searchStatefulSetsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchStatefulSetsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.STATEFUL_SETS, keyword, options);
+    public List<StatefulSetDetails> searchStatefulSetsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.STATEFUL_SETS, keyword, options, StatefulSetDetails::new);
     }
 
     /** 跨全部 namespace 搜索 DaemonSet，返回全部简易结果。 */
@@ -413,10 +447,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.DAEMON_SETS, keyword, options);
     }
     /** 跨全部 namespace 搜索 DaemonSet，返回全部详细结果。 */
-    public List<ResourceDetails> searchDaemonSetsDetailed(String keyword) { return searchDaemonSetsDetailed(keyword, null); }
+    public List<DaemonSetDetails> searchDaemonSetsDetailed(String keyword) { return searchDaemonSetsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchDaemonSetsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.DAEMON_SETS, keyword, options);
+    public List<DaemonSetDetails> searchDaemonSetsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.DAEMON_SETS, keyword, options, DaemonSetDetails::new);
     }
 
     /** 跨全部 namespace 搜索 ReplicaSet，返回全部简易结果。 */
@@ -426,10 +460,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.REPLICA_SETS, keyword, options);
     }
     /** 跨全部 namespace 搜索 ReplicaSet，返回全部详细结果。 */
-    public List<ResourceDetails> searchReplicaSetsDetailed(String keyword) { return searchReplicaSetsDetailed(keyword, null); }
+    public List<ReplicaSetDetails> searchReplicaSetsDetailed(String keyword) { return searchReplicaSetsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchReplicaSetsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.REPLICA_SETS, keyword, options);
+    public List<ReplicaSetDetails> searchReplicaSetsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.REPLICA_SETS, keyword, options, ReplicaSetDetails::new);
     }
 
     /** 跨全部 namespace 搜索 Job，返回全部简易结果。 */
@@ -439,10 +473,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.JOBS, keyword, options);
     }
     /** 跨全部 namespace 搜索 Job，返回全部详细结果。 */
-    public List<ResourceDetails> searchJobsDetailed(String keyword) { return searchJobsDetailed(keyword, null); }
+    public List<JobDetails> searchJobsDetailed(String keyword) { return searchJobsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchJobsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.JOBS, keyword, options);
+    public List<JobDetails> searchJobsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.JOBS, keyword, options, JobDetails::new);
     }
 
     /** 跨全部 namespace 搜索 CronJob，返回全部简易结果。 */
@@ -452,10 +486,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.CRON_JOBS, keyword, options);
     }
     /** 跨全部 namespace 搜索 CronJob，返回全部详细结果。 */
-    public List<ResourceDetails> searchCronJobsDetailed(String keyword) { return searchCronJobsDetailed(keyword, null); }
+    public List<CronJobDetails> searchCronJobsDetailed(String keyword) { return searchCronJobsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchCronJobsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.CRON_JOBS, keyword, options);
+    public List<CronJobDetails> searchCronJobsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.CRON_JOBS, keyword, options, CronJobDetails::new);
     }
 
     /** 跨全部 namespace 搜索 Ingress，返回全部简易结果。 */
@@ -465,10 +499,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.INGRESSES, keyword, options);
     }
     /** 跨全部 namespace 搜索 Ingress，返回全部详细结果。 */
-    public List<ResourceDetails> searchIngressesDetailed(String keyword) { return searchIngressesDetailed(keyword, null); }
+    public List<IngressDetails> searchIngressesDetailed(String keyword) { return searchIngressesDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchIngressesDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.INGRESSES, keyword, options);
+    public List<IngressDetails> searchIngressesDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.INGRESSES, keyword, options, IngressDetails::new);
     }
 
     /** 跨全部 namespace 搜索 PVC，返回全部简易结果。 */
@@ -478,10 +512,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.PERSISTENT_VOLUME_CLAIMS, keyword, options);
     }
     /** 跨全部 namespace 搜索 PVC，返回全部详细结果。 */
-    public List<ResourceDetails> searchPersistentVolumeClaimsDetailed(String keyword) { return searchPersistentVolumeClaimsDetailed(keyword, null); }
+    public List<PersistentVolumeClaimDetails> searchPersistentVolumeClaimsDetailed(String keyword) { return searchPersistentVolumeClaimsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchPersistentVolumeClaimsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.PERSISTENT_VOLUME_CLAIMS, keyword, options);
+    public List<PersistentVolumeClaimDetails> searchPersistentVolumeClaimsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.PERSISTENT_VOLUME_CLAIMS, keyword, options, PersistentVolumeClaimDetails::new);
     }
 
     /** 跨全部 namespace 搜索 Secret，返回全部简易结果。 */
@@ -491,10 +525,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.SECRETS, keyword, options);
     }
     /** 跨全部 namespace 搜索 Secret，返回全部详细结果。 */
-    public List<ResourceDetails> searchSecretsDetailed(String keyword) { return searchSecretsDetailed(keyword, null); }
+    public List<SecretDetails> searchSecretsDetailed(String keyword) { return searchSecretsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchSecretsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.SECRETS, keyword, options);
+    public List<SecretDetails> searchSecretsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.SECRETS, keyword, options, SecretDetails::new);
     }
 
     /** 跨全部 namespace 搜索 ServiceAccount，返回全部简易结果。 */
@@ -504,10 +538,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.SERVICE_ACCOUNTS, keyword, options);
     }
     /** 跨全部 namespace 搜索 ServiceAccount，返回全部详细结果。 */
-    public List<ResourceDetails> searchServiceAccountsDetailed(String keyword) { return searchServiceAccountsDetailed(keyword, null); }
+    public List<ServiceAccountDetails> searchServiceAccountsDetailed(String keyword) { return searchServiceAccountsDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchServiceAccountsDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.SERVICE_ACCOUNTS, keyword, options);
+    public List<ServiceAccountDetails> searchServiceAccountsDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.SERVICE_ACCOUNTS, keyword, options, ServiceAccountDetails::new);
     }
 
     /** 跨全部 namespace 搜索 NetworkPolicy，返回全部简易结果。 */
@@ -517,10 +551,10 @@ public class K8sApiClient {
         return searchResources(K8sResources.NETWORK_POLICIES, keyword, options);
     }
     /** 跨全部 namespace 搜索 NetworkPolicy，返回全部详细结果。 */
-    public List<ResourceDetails> searchNetworkPoliciesDetailed(String keyword) { return searchNetworkPoliciesDetailed(keyword, null); }
+    public List<NetworkPolicyDetails> searchNetworkPoliciesDetailed(String keyword) { return searchNetworkPoliciesDetailed(keyword, null); }
     /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
-    public List<ResourceDetails> searchNetworkPoliciesDetailed(String keyword, ListOptions options) {
-        return searchResourcesDetailed(K8sResources.NETWORK_POLICIES, keyword, options);
+    public List<NetworkPolicyDetails> searchNetworkPoliciesDetailed(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.NETWORK_POLICIES, keyword, options, NetworkPolicyDetails::new);
     }
 
     // ==================== 通用资源与 Discovery ====================

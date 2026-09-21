@@ -29,7 +29,7 @@ mvn -Dtest=MainDemoTest test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 无集群的 CLI 启动检查
-java -cp 'target/k8s-tools-1.6.1-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.6.2-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
@@ -68,8 +68,12 @@ java -cp 'target/k8s-tools-1.6.1-SNAPSHOT.jar:target/dependency/*' \
 
 ## 通用资源 API 约定
 
+- 从 1.6.2 起，`searchPodsDetailed` 自动把原客户端以 private final transient 字段绑定到 `PodDetails`；`K8sTools.exec/execShell(pod, ...)`、`pod.exec/execShell(...)`、`client.exec/execShell(pod, ...)` 复用同一执行链路，不重新初始化或额外 GET Pod。绑定不得经 getter、toJson、Gson 或 toString 暴露；保留原客户端的 TLS/Token/SSH 及版本缓存，无全局当前客户端。手动 new PodDetails(json) 不绑定，显式 client.exec 可执行；已绑定对象传另一客户端直接拒绝，刷新后重新查询。新入口仅有一个普通容器时自动选择；多容器/缺失定义必须显式指定，已有定义时校验普通/init/ephemeral 名称，忽略 kubectl 默认容器注解；原字符串重载行为不变。保留 options 总超时/输出上限/transport 且不修改输入；失败不刷新、不重放。测试 `PodDetailsExecTest`、`PodExecTest`、`PodExecSshFallbackTest`、`RedisCredentialsTest`、`LoggingTest` 及真实 E2E 的两种执行通道。
+
+- 从 1.6.2 起将 14 类具体详细搜索返回值改为 `List<PodDetails>`、`List<ConfigMapDetails>` 等对应子类；它们继承 `ResourceDetails`，Pod 模板工作负载共享 `WorkloadDetails`。通用 `searchResourcesDetailed` 仍为 `List<ResourceDetails>`。不要把 Pod/Service 专属 getter 加入公共基类；已发布 1.6.1 不含类型化 Details。旧代码的 `List<ResourceDetails>` 声明要改成具体类型或 `List<? extends ResourceDetails>`。专属标量缺失返回 null（数值/布尔用包装类型）、集合为空且不可修改、JSON 返回副本；不得为 getter 请求网络、推测默认状态或把创建时间当启动时间。Pod 的普通/init/ephemeral 容器及状态分别提供列表，不默认选择容器；容器当前状态与 lastState 分开。`JsonFields` 是包内快照读取工具，禁止暴露内部可变 JSON；嵌套对象 toString 不显示环境变量、命令或状态 message。变更需验证 `ResourceDetailsTest`、`ResourceSearchTest`，同步真实 `RealKubernetesIT` 和文档/示例的泛型声明。
+
 - 从 1.6.0 起，`K8sApiClient.searchPods/searchConfigMaps/searchServices` 等 14 类资源提供简易和 `Detailed` 详细版，均跨全部 namespace 返回所有名称包含关键词的 List；不优先精确名称、不要求唯一命中、不默认过滤状态。Pod 简易结果为 `PodSummary`（namespace/name/普通 containerNames），其余为 `ResourceSummary`（namespace/name）；详细版 `ResourceDetails` 提供常用元数据与完整 JSON 的副本，列表项缺少 apiVersion/kind 时只用明确的 ResourceDefinition 补齐，不覆盖服务端已有值。通用 `searchResources[Detailed]` 仅接受 namespaced 定义；选择器与页大小通过 ListOptions 传入，禁止 continueToken；默认每页 100，复用 listAll 的分页完整性规则，错误不能变成空列表或部分结果。空白关键词拒绝，关键词不进入日志；简单结果不得保留完整正文，详细结果 toString 仅显示身份。文档见 [搜索 SDK](docs/resource-search.md)，测试 `ResourceSearchTest` 及真实 `RealKubernetesIT` 搜索场景。
-- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，已有凭据查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，当前源码的 SSH/Redis 全查询 main 示例在 [docs/examples/K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)，运行说明见 [docs/examples/all-queries.md](docs/examples/all-queries.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.6.1-SNAPSHOT`。
+- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，已有凭据查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，当前源码的 SSH/Redis 全查询 main 示例在 [docs/examples/K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)，运行说明见 [docs/examples/all-queries.md](docs/examples/all-queries.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.6.2-SNAPSHOT`。
 - `ResourceDefinition` 明确 apiVersion、plural、Kind 和作用域；`K8sResources` 是常用常量，不是完整 API 清单。CRD 和其他资源用 Discovery 或显式定义，禁止推测 Kind 的复数。
 - 写入使用完整 Gson JSON，保留未知字段并复制输入；原有简化 POJO 只用于读取，不能拿它们做完整 PUT。PUT 要求 `metadata.resourceVersion`，冲突交由调用方合并。
 - 集群资源不能指定 namespace；命名空间资源的单对象读写和集合删除必须有具体 namespace。只有旧 list 快捷方法把字符串 `all` 解释为跨命名空间，新入口的 `all` 是真实命名空间。

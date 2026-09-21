@@ -1,6 +1,6 @@
 # 从 SSH、Redis 到全部查询接口的 main 示例
 
-入口文件：[K8sAllQueriesExample.java](K8sAllQueriesExample.java)。兼容 Java 8，依赖 `io.github.iskycc:k8s-tools:1.6.1`，使用从 `1.5.0` 起提供的客户端托管 Redis 接口；`1.3.0` 不包含此入口。也可直接在本仓库编译运行。
+入口文件：[K8sAllQueriesExample.java](K8sAllQueriesExample.java)。兼容 Java 8，依赖 `io.github.iskycc:k8s-tools:1.6.2`，使用从 `1.5.0` 起提供的客户端托管 Redis 接口；`1.3.0` 不包含此入口。也可直接在本仓库编译运行。
 
 示例执行顺序：配置 SSH → 将 Redis URL 传给客户端 Builder → `fromSsh` 内部读取缓存或通过 SSH 获取凭据并发现 API 地址 → 执行查询。密码模式优先；设置了非空 SSH 密码后不会使用本地私钥。API 地址、token 和证书均无需手工输入。
 
@@ -35,7 +35,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExamp
 java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExample --refresh-cache
 ```
 
-在其他 Maven 项目运行时，使用 [Maven 配置指南](../maven-usage.md#从空项目运行一个查询示例)中的 POM，依赖版本使用 `1.6.1`；将示例复制到 `src/main/java/K8sAllQueriesExample.java`，运行 `mvn compile dependency:copy-dependencies -DincludeScope=runtime`，再使用 `java -cp 'target/classes:target/dependency/*' K8sAllQueriesExample`。Windows 的 classpath 分隔符改为 `;`，并使用双引号。
+在其他 Maven 项目运行时，使用 [Maven 配置指南](../maven-usage.md#从空项目运行一个查询示例)中的 POM，依赖版本使用 `1.6.2`；将示例复制到 `src/main/java/K8sAllQueriesExample.java`，运行 `mvn compile dependency:copy-dependencies -DincludeScope=runtime`，再使用 `java -cp 'target/classes:target/dependency/*' K8sAllQueriesExample`。Windows 的 classpath 分隔符改为 `;`，并使用双引号。
 
 ## 配置
 
