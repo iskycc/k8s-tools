@@ -1,6 +1,9 @@
 package com.iskycc.k8s.ssh;
 
 import com.iskycc.k8s.K8sToolsException;
+import com.iskycc.k8s.internal.LogSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.UserAuthFactory;
 import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory;
@@ -36,6 +39,7 @@ import java.util.Set;
  */
 public class SshExecutor implements Closeable {
 
+    private static final Logger LOG = LoggerFactory.getLogger(SshExecutor.class);
     private final SshConfig config;
     private SshClient client;
     private ClientSession session;
@@ -54,6 +58,11 @@ public class SshExecutor implements Closeable {
         if (session != null && session.isOpen()) {
             return;
         }
+        long started = System.nanoTime();
+        String stage = "connect";
+        LOG.info("SSH 连接开始 host={} port={} user={} passwordOnly={} timeoutMs={}",
+                LogSupport.field(config.getHost()), config.getPort(), LogSupport.field(config.getUsername()),
+                config.isPasswordOnly(), config.getConnectTimeoutMs());
         try {
             client = SshClient.setUpDefaultClient();
             if (config.isPasswordOnly()) {
@@ -72,6 +81,7 @@ public class SshExecutor implements Closeable {
                     .getSession();
             if (!config.isPasswordOnly()
                     && config.getPrivateKeyPath() != null && !config.getPrivateKeyPath().isEmpty()) {
+                stage = "load-key";
                 for (KeyPair kp : loadKeyPairs()) {
                     s.addPublicKeyIdentity(kp);
                 }
@@ -79,17 +89,28 @@ public class SshExecutor implements Closeable {
             if (config.getPassword() != null && !config.getPassword().isEmpty()) {
                 s.addPasswordIdentity(config.getPassword());
             }
+            stage = "authenticate";
             s.auth().verify(config.getConnectTimeoutMs());
             this.session = s;
+            LOG.info("SSH 连接成功 host={} port={} elapsedMs={}",
+                    LogSupport.field(config.getHost()), config.getPort(), LogSupport.elapsedMs(started));
         } catch (K8sToolsException e) {
+            logConnectFailure(stage, started, e);
             closeQuietly();
             throw e;
         } catch (IOException | GeneralSecurityException | RuntimeException e) {
+            logConnectFailure(stage, started, e);
             closeQuietly();
             throw new K8sToolsException(
                     "SSH 连接失败 " + config.getUsername() + "@" + config.getHost() + ":"
                             + config.getPort() + " - " + rootMessage(e), e);
         }
+    }
+
+    private void logConnectFailure(String stage, long started, Exception error) {
+        LOG.error("SSH 连接失败 host={} port={} stage={} elapsedMs={} errorType={}",
+                LogSupport.field(config.getHost()), config.getPort(), stage,
+                LogSupport.elapsedMs(started), LogSupport.errorType(error));
     }
 
     private Iterable<KeyPair> loadKeyPairs() throws IOException, GeneralSecurityException {
@@ -115,6 +136,7 @@ public class SshExecutor implements Closeable {
      */
     public ExecResult exec(String command, int timeoutMs) {
         connect();
+        long started = System.nanoTime();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         try (ClientChannel channel = session.createExecChannel(command)) {
@@ -128,12 +150,21 @@ public class SshExecutor implements Closeable {
                 throw new K8sToolsException("SSH 命令执行超时(" + timeoutMs + "ms): " + command);
             }
             Integer exit = channel.getExitStatus();
+            LOG.debug("SSH 命令完成 host={} exitCode={} elapsedMs={} timeoutMs={}",
+                    LogSupport.field(config.getHost()), exit == null ? -1 : exit,
+                    LogSupport.elapsedMs(started), timeoutMs);
             return new ExecResult(exit == null ? -1 : exit,
                     new String(out.toByteArray(), StandardCharsets.UTF_8),
                     new String(err.toByteArray(), StandardCharsets.UTF_8));
         } catch (K8sToolsException e) {
+            LOG.warn("SSH 命令执行超时 host={} elapsedMs={} timeoutMs={} errorType={}",
+                    LogSupport.field(config.getHost()), LogSupport.elapsedMs(started), timeoutMs,
+                    LogSupport.errorType(e));
             throw e;
         } catch (IOException e) {
+            LOG.warn("SSH 命令失败 host={} elapsedMs={} timeoutMs={} errorType={}",
+                    LogSupport.field(config.getHost()), LogSupport.elapsedMs(started), timeoutMs,
+                    LogSupport.errorType(e));
             throw new K8sToolsException("SSH 命令执行失败: " + command + " - " + rootMessage(e), e);
         }
     }

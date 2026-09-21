@@ -2,7 +2,7 @@ name: Real Kubernetes E2E
 
 on:
   push:
-    branches: [main, ci/real-k8s-e2e]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

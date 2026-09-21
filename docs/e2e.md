@@ -16,7 +16,7 @@ kind 是在容器中运行的 Kubernetes，提供真实 API；mock API Server �
 - runner：`ubuntu-24.04`；Java 8、21 两个独立作业，每个作业创建自己的集群。
 - kind `v0.33.0`、Kubernetes `v1.37.0`，二进制 SHA256 和节点镜像 digest 固定，来源见 [kind 发布说明](https://github.com/kubernetes-sigs/kind/releases/tag/v0.33.0)。kubectl 从该节点镜像复制，版本与 API Server 一致。
 - OpenSSH 和 Redis 使用 runner 的 Ubuntu 软件包，Redis 实际版本输出到准备步骤日志；测试工作负载使用 `registry.k8s.io/pause:3.10`。
-- 推送 `main`、验证分支 `ci/real-k8s-e2e`、PR 或手动 `workflow_dispatch` 均可触发。合并流程后，可在 Actions → **Real Kubernetes E2E** → **Run workflow** 手动执行。
+- 推送 `main`、PR 或手动 `workflow_dispatch` 均可触发。可在 Actions → **Real Kubernetes E2E** → **Run workflow** 手动执行。
 - 只使用 `contents: read` 权限，不发布 Maven 版本，不访问生产集群。
 
 SSH 服务监听 `127.0.0.1:22222`，使用临时用户 `k8se2e`；Redis 监听 `127.0.0.1:16379`，启用临时密码。SSH 登录后执行的是实际 kubectl，使用临时 kind kubeconfig；SSH 服务在 runner 上，API Server 和节点在 kind 容器中。它验证远程执行链路，不模拟独立物理 master 的网络拓扑。

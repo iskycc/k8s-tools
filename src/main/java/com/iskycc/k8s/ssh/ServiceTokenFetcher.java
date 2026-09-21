@@ -2,6 +2,9 @@ package com.iskycc.k8s.ssh;
 
 import com.iskycc.k8s.K8sToolsException;
 import com.google.gson.JsonObject;
+import com.iskycc.k8s.internal.LogSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.net.URI;
@@ -41,6 +44,7 @@ import java.util.Base64;
  */
 public class ServiceTokenFetcher implements Closeable {
 
+    private static final Logger LOG = LoggerFactory.getLogger(ServiceTokenFetcher.class);
     private final SshConfig sshConfig;
     private final Options options;
     private final SshExecutor ssh;
@@ -66,26 +70,47 @@ public class ServiceTokenFetcher implements Closeable {
      * -> 获取永久 token -> 确保 RBAC 绑定 -> 自动发现 API 地址 -> 获取 CA。
      */
     public MasterInfo fetch() {
+        long started = System.nanoTime();
+        String stage = "validate";
+        String master = LogSupport.field(sshConfig.getHost());
         try {
             options.validate();
+            LOG.info("集群凭据获取开始 master={} namespace={} serviceAccount={} cacheEnabled={}",
+                    master, options.serviceAccountNamespace, options.serviceAccount, options.redisCache != null);
             if (options.redisCache != null) {
+                stage = "cache.read";
                 MasterInfo cached = options.redisCache.load(sshConfig.getHost(), options.cacheContext());
                 if (cached != null) {
+                    LOG.info("集群凭据获取完成 master={} source=redis elapsedMs={}", master, LogSupport.elapsedMs(started));
                     return cached;
                 }
             }
+            stage = "ssh.connect";
             ssh.connect();
+            stage = "sa.ensure";
             boolean saExisted = ensureServiceAccount();
+            stage = "token.read";
             String token = fetchPermanentToken(saExisted);
+            stage = "rbac.ensure";
             ensureClusterRoleBinding();
+            stage = "api.discover";
             String apiServer = fetchApiServerUrl();
+            stage = "ca.read";
             String caPem = options.fetchCaCert ? fetchCaCert() : null;
             MasterInfo info = new MasterInfo(apiServer, token, caPem,
                     options.serviceAccount, options.serviceAccountNamespace);
             if (options.redisCache != null) {
+                stage = "cache.write";
                 options.redisCache.save(sshConfig.getHost(), options.cacheContext(), info);
             }
+            LOG.info("集群凭据获取完成 master={} source=ssh server={} caPresent={} elapsedMs={}",
+                    master, LogSupport.endpoint(apiServer), caPem != null, LogSupport.elapsedMs(started));
             return info;
+        } catch (RuntimeException e) {
+            LOG.error("集群凭据获取失败 master={} namespace={} serviceAccount={} stage={} elapsedMs={} errorType={}",
+                    master, LogSupport.field(options.serviceAccountNamespace), LogSupport.field(options.serviceAccount),
+                    stage, LogSupport.elapsedMs(started), LogSupport.errorType(e));
+            throw e;
         } finally {
             close();
         }
@@ -94,6 +119,7 @@ public class ServiceTokenFetcher implements Closeable {
     /** 删除 Redis 中的旧凭据后重新通过 SSH 获取；不会重放此前的 API 请求。 */
     public MasterInfo refresh() {
         options.validate();
+        LOG.info("显式刷新集群凭据 master={}", LogSupport.field(sshConfig.getHost()));
         invalidateCache();
         return fetch();
     }
@@ -115,11 +141,13 @@ public class ServiceTokenFetcher implements Closeable {
         String ns = options.serviceAccountNamespace;
         ExecResult get = ssh.exec("kubectl -n " + ns + " get sa " + sa, options.commandTimeoutMs);
         if (get.isSuccess()) {
+            LOG.debug("复用 ServiceAccount namespace={} name={}", ns, sa);
             return true;
         }
         ExecResult create = ssh.exec("kubectl create serviceaccount " + sa + " -n " + ns,
                 options.commandTimeoutMs);
         if (create.isSuccess()) {
+            LOG.info("已创建 ServiceAccount namespace={} name={}", ns, sa);
             return false;
         }
         if (isAlreadyExists(create)) {
@@ -143,6 +171,7 @@ public class ServiceTokenFetcher implements Closeable {
                         + " --serviceaccount=" + ns + ":" + sa,
                 options.commandTimeoutMs);
         if (create.isSuccess() || isAlreadyExists(create)) {
+            LOG.debug("ClusterRoleBinding 已存在或已创建 name={} created={}", binding, create.isSuccess());
             return;
         }
         ExecResult get = ssh.exec("kubectl get clusterrolebinding " + binding,
@@ -170,12 +199,14 @@ public class ServiceTokenFetcher implements Closeable {
             if (!autoSecret.isEmpty()) {
                 String token = readSecretToken(autoSecret);
                 if (token != null) {
+                    LOG.debug("复用 SA 自动关联的 token Secret namespace={} serviceAccount={}", ns, sa);
                     return token;
                 }
             }
             // 2) 本工具此前创建的手动 secret（幂等重跑），直接复用
             String token = readSecretToken(manualSecret);
             if (token != null) {
+                LOG.debug("复用手动 token Secret namespace={} name={}", ns, manualSecret);
                 return token;
             }
             // 3) SA 存在但拿不到永久 token：先删除再重建
@@ -184,6 +215,7 @@ public class ServiceTokenFetcher implements Closeable {
                         + " 已存在但无法获取永久 token，且已禁用自动删除重建"
                         + "(recreateSaWhenTokenUnobtainable=false)");
             }
+            LOG.warn("已有 SA 无法读取 token，即将删除并重建 namespace={} serviceAccount={}", ns, sa);
             recreateServiceAccount(manualSecret);
         }
 
@@ -214,6 +246,7 @@ public class ServiceTokenFetcher implements Closeable {
                         + " 绑定 ServiceAccount 失败: " + annotate.combinedOutput());
             }
         }
+        LOG.debug("token Secret 已准备，等待 controller 填充 namespace={} name={}", ns, manualSecret);
         String token = readSecretTokenWithRetry(manualSecret);
         if (token == null) {
             throw new K8sToolsException("等待 Secret " + ns + "/" + manualSecret
@@ -268,8 +301,13 @@ public class ServiceTokenFetcher implements Closeable {
             }
             String token = readSecretToken(secretName);
             if (token != null) {
+                LOG.debug("token Secret 已就绪 namespace={} name={} attempt={}",
+                        options.serviceAccountNamespace, secretName, i + 1);
                 return token;
             }
+            LOG.debug("等待 token Secret namespace={} name={} attempt={} maxAttempts={} intervalMs={}",
+                    options.serviceAccountNamespace, secretName, i + 1,
+                    (long) options.tokenWaitRetries + 1, options.tokenWaitIntervalMs);
         }
         return null;
     }
@@ -288,6 +326,7 @@ public class ServiceTokenFetcher implements Closeable {
      */
     private String fetchApiServerUrl() {
         if (options.apiServerOverride != null && !options.apiServerOverride.trim().isEmpty()) {
+            LOG.info("API 地址已确定 source=override server={}", LogSupport.endpoint(options.apiServerOverride));
             return options.apiServerOverride.trim();
         }
         // 1) 当前 kubeconfig
@@ -295,17 +334,22 @@ public class ServiceTokenFetcher implements Closeable {
                 + " -o jsonpath={.clusters[0].cluster.server}", options.commandTimeoutMs);
         String url = normalizeDiscoveredUrl(r.getStdout());
         if (r.isSuccess() && url != null) {
+            LOG.info("API 地址已发现 source=kubeconfig server={}", LogSupport.endpoint(url));
             return url;
         }
+        LOG.debug("API 地址发现继续下一来源 source=kubeconfig exitCode={} validUrl={}", r.getExitCode(), url != null);
         // 2) master 上的 admin.conf
         ExecResult conf = ssh.exec("awk '/server:/{print $2; exit}' " + shellQuote(options.kubeConfigPath),
                 options.commandTimeoutMs);
         url = normalizeDiscoveredUrl(conf.getStdout());
         if (conf.isSuccess() && url != null) {
+            LOG.info("API 地址已发现 source=admin-conf server={}", LogSupport.endpoint(url));
             return url;
         }
         // 3) 兜底：按 master 默认 6443 端口推断
-        return urlForHost("https", sshConfig.getHost().trim(), 6443);
+        url = urlForHost("https", sshConfig.getHost().trim(), 6443);
+        LOG.warn("API 地址发现使用默认端口 source=fallback server={}", LogSupport.endpoint(url));
+        return url;
     }
 
     static boolean isValidApiServerUrl(String value) {
@@ -344,9 +388,12 @@ public class ServiceTokenFetcher implements Closeable {
     private String fetchCaCert() {
         ExecResult r = ssh.exec("cat -- " + shellQuote(options.caCertPath), options.commandTimeoutMs);
         if (r.isSuccess() && r.getStdout().contains("BEGIN CERTIFICATE")) {
+            LOG.debug("集群 CA 已读取 master={}", LogSupport.field(sshConfig.getHost()));
             return r.getStdout().trim();
         }
         // CA 获取失败不致命：客户端默认会自动忽略自签名/校验失败
+        LOG.warn("未读取到集群 CA master={} exitCode={}，严格 TLS 模式需由 JVM 信任集群证书",
+                LogSupport.field(sshConfig.getHost()), r.getExitCode());
         return null;
     }
 

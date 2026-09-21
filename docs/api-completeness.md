@@ -1,6 +1,6 @@
 # 工具库完整性核对
 
-核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.5.0-SNAPSHOT`。
+核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.5.2-SNAPSHOT`。
 
 ## 1.5.0 客户端托管 Redis
 
@@ -37,7 +37,7 @@
 | TLS | 不支持多个 CA，所有请求按 GET 设计 | 支持 PEM CA bundle；写入不自动降级/重放；保留旧读请求兼容行为 |
 | SSH 凭据初始化 | token Secret 创建时缺少必需 SA 注解 | 提交带注解的完整 Secret JSON；AlreadyExists 时补注解；mock 拒绝旧创建命令 |
 | SSH 输入 | 资源名和路径直接拼命令 | 资源名/重试参数先校验，远端绝对路径与 JSON 正文做 shell 引号处理 |
-| 下游依赖 | 库传递依赖带入 NOP 日志实现 | NOP 改为 optional，使用者自行选择日志实现 |
+| 下游依赖 | 库传递依赖带入 NOP 日志实现 | 日志实现保持 optional；1.5.2 的 CLI 使用 Simple，使用者自行选择 provider |
 | 使用文档 | 只有 CLI 和简化列表查询 | [Java API 指南](library-api.md)，包含 CRUD、分页、CRD、Apply、子资源示例 |
 
 ## “所有资源”的准确范围
