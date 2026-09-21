@@ -14,6 +14,7 @@
 3. [Redis 凭据缓存与自动接入](docs/redis-cache.md)：缓存 token/API 地址、删除刷新、免手工配置 API 与证书；缓存从 `1.3.0` 起提供，客户端托管入口从 `1.5.0` 起提供。
 4. [Java API 使用指南](docs/library-api.md)：连接、CRUD、Deployment/Service、分页、CRD、子资源和错误处理。
 5. [Pod 容器命令执行](docs/pod-exec.md)：`client.exec(namespace, podName, command...)` 返回 stdout/stderr/退出码，支持指定容器和超时；有 SSH 配置时，低于 Kubernetes 1.31 自动选择 SSH/kubectl，其余使用 API WebSocket。从 `1.5.5` 起提供。
+   跨全部 namespace 按名称关键词查找 Pod 并执行整条命令，见[可运行 main 示例](docs/examples/pod-search-exec.md)。
 6. [日志与排障](docs/logging.md)：启用日志、定位 SSH/Redis/API 失败、按 requestId 和 Audit-ID 排查请求。`1.5.5` 新增全局调试开关，默认关闭 DEBUG、保留必要日志；通过 `K8sLogging.setDebugEnabled(...)` 或 JVM 参数 `-Dk8s.tools.debug=...` 配置。
 
 真实集群验证见 [GitHub Actions E2E](docs/e2e.md)：使用临时 kind Kubernetes、OpenSSH 和 Redis，在 Java 8、21 上验证接入、查询、CRUD、分页、CRD、RBAC 和 TLS。
