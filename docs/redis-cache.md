@@ -1,6 +1,6 @@
 # Redis 凭据缓存与自动接入
 
-Redis 缓存和静态 `K8sApiClient.fromSsh` 从正式版 `1.3.0` 起提供。本文的 **客户端托管 Redis** 入口 `K8sApiClient.builder().redisUrl(...).fromSsh(...)` 从正式版 `1.5.0` 起提供，使用 `io.github.iskycc:k8s-tools:1.6.0`；也可从源码 `mvn clean install` 后引用本地 `1.6.0-SNAPSHOT`。Jedis 固定为 `5.2.0`，使用方无需直接引用它的 API。
+Redis 缓存和静态 `K8sApiClient.fromSsh` 从正式版 `1.3.0` 起提供。本文的 **客户端托管 Redis** 入口 `K8sApiClient.builder().redisUrl(...).fromSsh(...)` 从正式版 `1.5.0` 起提供，使用 `io.github.iskycc:k8s-tools:1.6.1`；也可从源码 `mvn clean install` 后引用本地 `1.6.1-SNAPSHOT`。Jedis 固定为 `5.2.0`，使用方无需直接引用它的 API。
 
 ## 键与读取流程
 
@@ -24,7 +24,7 @@ key 直接使用 `SshConfig.host` 去除首尾空白后拼接后缀，不加冒�
 
 ## Java 接入：无需手工填写 API 地址或证书
 
-当前源码也支持用 [K8sInstance](k8s-instance.md) 分别传入 SSH 与 Redis 的 IP、端口、密码，再调用 `K8sTools.init(instance)`；内部编码 Redis 密码，使用默认用户和数据库 0。此入口尚未发布，`1.6.0` 不含；下面的 Builder 接口继续保留全部高级配置能力。
+从 `1.6.1` 起也支持用 [K8sInstance](k8s-instance.md) 分别传入 SSH 与 Redis 的 IP、端口、密码，再调用 `K8sTools.init(instance)`；内部编码 Redis 密码，使用默认用户和数据库 0。`1.6.0` 不含此入口；下面的 Builder 接口继续保留全部高级配置能力。
 
 需要一份直接运行的 `main` 程序时，使用 [K8sAllQueriesExample.java](examples/K8sAllQueriesExample.java)，按[运行指南](examples/all-queries.md)配置 SSH 和 Redis 后，即可演示本库各类查询入口、Discovery、CRD 和分页。
 
@@ -111,7 +111,7 @@ HTTP 401 可作为重新获取凭据的信号；403 通常表示权限不足，�
 
 ```bash
 export K8S_TOOLS_REDIS_URL='redis://127.0.0.1:6379/0'
-java -cp 'target/k8s-tools-1.6.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.6.1-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --host 192.0.2.10 --user root \
   --password '<SSH 密码>' --password-only
 ```

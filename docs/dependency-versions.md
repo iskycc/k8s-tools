@@ -1,6 +1,6 @@
 # Java 8 依赖版本核对
 
-本页记录 `1.6.0` 的依赖；本次搜索 SDK 未新增或升级依赖，沿用 `1.5.5` 的组件及 Pod Exec 依赖：原有依赖于 2026-09-20 核对；2026-09-21 将 optional 日志实现从 NOP 改为 Simple，并核对 [Simple 元数据](https://repo.maven.apache.org/maven2/org/slf4j/slf4j-simple/maven-metadata.xml)，最新稳定版仍为 `2.0.19`，与 API 版本一致。已有正式版的 POM 不会被覆盖。
+本页记录 `1.6.1` 的依赖；统一初始化入口及 `1.6.0` 的搜索 SDK 均未新增或升级依赖，沿用 `1.5.5` 的组件及 Pod Exec 依赖：原有依赖于 2026-09-20 核对；2026-09-21 将 optional 日志实现从 NOP 改为 Simple，并核对 [Simple 元数据](https://repo.maven.apache.org/maven2/org/slf4j/slf4j-simple/maven-metadata.xml)，最新稳定版仍为 `2.0.19`，与 API 版本一致。已有正式版的 POM 不会被覆盖。
 
 版本策略是选择**支持 Java 8 的最新稳定版本**；Jedis 按接入要求固定为 `5.2.0`，不随此策略升级。先读取 Maven Central 的完整版本列表，排除预发布版本，再核对上游最低运行 JDK、实际 jar 基础字节码和本项目在 JDK 8 下的测试。不能直接采用元数据的 `latest` / `release` 字段，因为这些字段可能指向 alpha 或 milestone。
 

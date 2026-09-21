@@ -1,6 +1,6 @@
 # 按关键词查找 Pod，再执行命令
 
-完整 main 示例：[K8sPodSearchExecExample.java](K8sPodSearchExecExample.java)，兼容 Java 8，使用 `io.github.iskycc:k8s-tools:1.6.0`。流程为 SSH/Redis 接入 → 跨全部 namespace 查询 Pod → 名称包含关键词匹配 → 选择容器 → `execShell` 执行整条命令并输出结果。
+完整 main 示例：[K8sPodSearchExecExample.java](K8sPodSearchExecExample.java)，兼容 Java 8，使用 `io.github.iskycc:k8s-tools:1.6.1`。流程为 SSH/Redis 接入 → 跨全部 namespace 查询 Pod → 名称包含关键词匹配 → 选择容器 → `execShell` 执行整条命令并输出结果。
 
 ## 已有客户端时的核心调用
 
@@ -68,7 +68,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' \
 
 未配置 Redis URL 时不启用缓存；有缓存时由 `fromSsh` 读取，业务代码不引用 Jedis。Redis 密码含特殊字符时需要百分号编码，详见 [Redis 接入](../redis-cache.md#redis-url-带密码的格式)。无 SSH 密码时需设置 `K8S_SSH_KEY`，私钥口令用可选的 `K8S_SSH_KEY_PASSPHRASE`；密码存在时强制密码登录。无需设置 `K8S_NAMESPACE`；即使环境中已有该变量，本示例也不读取它，始终跨全部 namespace 搜索。
 
-在其他 Maven 项目使用时，按 [Maven 配置指南](../maven-usage.md)引用 `1.6.0`，将示例复制到 `src/main/java`；运行 classpath 改为 `target/classes:target/dependency/*`。Windows 使用 `;` 分隔 classpath，并调整为对应 shell 的引号规则。
+在其他 Maven 项目使用时，按 [Maven 配置指南](../maven-usage.md)引用 `1.6.1`，将示例复制到 `src/main/java`；运行 classpath 改为 `target/classes:target/dependency/*`。Windows 使用 `;` 分隔 classpath，并调整为对应 shell 的引号规则。
 
 ## 执行结果与边界
 

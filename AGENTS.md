@@ -29,7 +29,7 @@ mvn -Dtest=MainDemoTest test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 无集群的 CLI 启动检查
-java -cp 'target/k8s-tools-1.6.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.6.1-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
@@ -49,7 +49,7 @@ java -cp 'target/k8s-tools-1.6.0-SNAPSHOT.jar:target/dependency/*' \
 
 以下是当前实现的行为边界；涉及变更时同步调整调用方、文档和相关测试：
 
-- 当前源码新增根包 `K8sInstance` 与 `K8sTools`，已发布 1.6.0 不含。七参数构造顺序为 master SSH IP、端口、用户名、密码、Redis 原始密码、IP、端口；构造只校验，`K8sTools.init(instance[, options])` 返回完整 K8sApiClient。复用 Builder.fromSsh 的缓存/凭据/TLS/SSH Exec 行为，不保存全局客户端；refresh 返回新客户端、不重放业务请求。强制 passwordOnly，Redis 使用默认用户、TCP、DB 0；null/空 Redis 密码表示无认证，非空密码保留空白并按 UTF-8 编码一次；IPv6 正确加括号。连接生命周期仍由原客户端管理，不对外暴露 Jedis；对象 toString 隐藏密码，异常不回显非法 host。入口说明见 [K8sInstance](docs/k8s-instance.md)，测试 K8sInstanceTest 并回归 RedisCredentialsTest、ServiceTokenDiscoveryTest、MainDemoTest、LoggingTest。
+- 从 1.6.1 起提供根包 `K8sInstance` 与 `K8sTools`，1.6.0 不含。七参数构造顺序为 master SSH IP、端口、用户名、密码、Redis 原始密码、IP、端口；构造只校验，`K8sTools.init(instance[, options])` 返回完整 K8sApiClient。复用 Builder.fromSsh 的缓存/凭据/TLS/SSH Exec 行为，不保存全局客户端；refresh 返回新客户端、不重放业务请求。强制 passwordOnly，Redis 使用默认用户、TCP、DB 0；null/空 Redis 密码表示无认证，非空密码保留空白并按 UTF-8 编码一次；IPv6 正确加括号。连接生命周期仍由原客户端管理，不对外暴露 Jedis；对象 toString 隐藏密码，异常不回显非法 host。入口说明见 [K8sInstance](docs/k8s-instance.md)，测试 K8sInstanceTest 并回归 RedisCredentialsTest、ServiceTokenDiscoveryTest、MainDemoTest、LoggingTest。
 - 凭据获取会写入集群，默认使用 `kube-system/k8s-tools` SA、`k8s-tools-token` Secret 和指向 `cluster-admin` 的 `k8s-tools` ClusterRoleBinding。
 - 已有 SA 依次尝试自动 Secret 和手动 Secret；均无法读取 token 时默认删除并重建 SA。关闭 `recreateSaWhenTokenUnobtainable` 后直接抛异常。重试数表示首次读取之后的次数。
 - 已存在的 ClusterRoleBinding 不会校验或修正角色和主体；不要把“存在”描述成“权限已验证”。
@@ -69,7 +69,7 @@ java -cp 'target/k8s-tools-1.6.0-SNAPSHOT.jar:target/dependency/*' \
 ## 通用资源 API 约定
 
 - 从 1.6.0 起，`K8sApiClient.searchPods/searchConfigMaps/searchServices` 等 14 类资源提供简易和 `Detailed` 详细版，均跨全部 namespace 返回所有名称包含关键词的 List；不优先精确名称、不要求唯一命中、不默认过滤状态。Pod 简易结果为 `PodSummary`（namespace/name/普通 containerNames），其余为 `ResourceSummary`（namespace/name）；详细版 `ResourceDetails` 提供常用元数据与完整 JSON 的副本，列表项缺少 apiVersion/kind 时只用明确的 ResourceDefinition 补齐，不覆盖服务端已有值。通用 `searchResources[Detailed]` 仅接受 namespaced 定义；选择器与页大小通过 ListOptions 传入，禁止 continueToken；默认每页 100，复用 listAll 的分页完整性规则，错误不能变成空列表或部分结果。空白关键词拒绝，关键词不进入日志；简单结果不得保留完整正文，详细结果 toString 仅显示身份。文档见 [搜索 SDK](docs/resource-search.md)，测试 `ResourceSearchTest` 及真实 `RealKubernetesIT` 搜索场景。
-- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，已有凭据查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，当前源码的 SSH/Redis 全查询 main 示例在 [docs/examples/K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)，运行说明见 [docs/examples/all-queries.md](docs/examples/all-queries.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.6.0-SNAPSHOT`。
+- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，已有凭据查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，当前源码的 SSH/Redis 全查询 main 示例在 [docs/examples/K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)，运行说明见 [docs/examples/all-queries.md](docs/examples/all-queries.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.6.1-SNAPSHOT`。
 - `ResourceDefinition` 明确 apiVersion、plural、Kind 和作用域；`K8sResources` 是常用常量，不是完整 API 清单。CRD 和其他资源用 Discovery 或显式定义，禁止推测 Kind 的复数。
 - 写入使用完整 Gson JSON，保留未知字段并复制输入；原有简化 POJO 只用于读取，不能拿它们做完整 PUT。PUT 要求 `metadata.resourceVersion`，冲突交由调用方合并。
 - 集群资源不能指定 namespace；命名空间资源的单对象读写和集合删除必须有具体 namespace。只有旧 list 快捷方法把字符串 `all` 解释为跨命名空间，新入口的 `all` 是真实命名空间。

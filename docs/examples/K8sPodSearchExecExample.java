@@ -15,7 +15,7 @@ import java.util.List;
 
 /**
  * Java 8 示例：SSH/Redis 接入 -> 跨全部 namespace 按名称关键词查找 Pod -> 执行整条 shell 命令。
- * 依赖 io.github.iskycc:k8s-tools:1.6.0，运行说明见 pod-search-exec.md。
+ * 依赖 io.github.iskycc:k8s-tools:1.6.1，运行说明见 pod-search-exec.md。
  * 本文件位于 docs，不进入库的发布包。初始化可能写入 SA/Secret/RBAC。
  */
 public final class K8sPodSearchExecExample {

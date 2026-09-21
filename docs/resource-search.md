@@ -1,6 +1,6 @@
 # 跨全部 namespace 搜索资源（1.6.0 起）
 
-入口是 `K8sApiClient`，不需要传 namespace。每种资源都有简易版和详细版，均返回全部名称匹配项的 `List`，没有匹配时返回空 List。先按 [Maven 配置](maven-usage.md)引用 `io.github.iskycc:k8s-tools:1.6.0`，通过已有 API 凭据或 [SSH/Redis](redis-cache.md)创建 `client`。
+入口是 `K8sApiClient`，不需要传 namespace。每种资源都有简易版和详细版，均返回全部名称匹配项的 `List`，没有匹配时返回空 List。先按 [Maven 配置](maven-usage.md)引用 `io.github.iskycc:k8s-tools:1.6.1`，通过已有 API 凭据或 [SSH/Redis](redis-cache.md)创建 `client`。
 
 ## 最小调用
 

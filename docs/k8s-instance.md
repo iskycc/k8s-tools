@@ -1,6 +1,6 @@
 # K8sInstance：统一初始化与完整工具调用
 
-`K8sInstance` 和 `K8sTools` 是当前源码新增的公共入口，**已发布的 `1.6.0` 不包含**。先在本仓库执行 `mvn install`，业务项目引用本地 `io.github.iskycc:k8s-tools:1.6.0-SNAPSHOT`。本次未发布新版本或远端快照。
+`K8sInstance` 和 `K8sTools` 从正式版 **`1.6.1`** 起提供，`1.6.0` 不包含。业务项目按 [Maven 配置指南](maven-usage.md)引用 `io.github.iskycc:k8s-tools:1.6.1`，发布完成后可从 Maven Central 下载。也可先在本仓库执行 `mvn install`，引用本地 `1.6.1-SNAPSHOT`；本次不发布远端快照。
 
 ## 七个参数初始化目标集群
 

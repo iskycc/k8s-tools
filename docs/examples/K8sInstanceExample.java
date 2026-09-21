@@ -10,7 +10,7 @@ import java.util.List;
 
 /**
  * Java 8：七个参数构造 K8sInstance，统一初始化后使用完整 SDK。
- * 此入口为当前源码新增，已发布的 1.6.0 不含；先从源码构建 1.6.0-SNAPSHOT。
+ * 依赖 io.github.iskycc:k8s-tools:1.6.1；此入口从 1.6.1 起提供，1.6.0 不含。
  * 本示例位于 docs，不进入发布包。SSH 初始化可能写入 SA/Secret/RBAC，后续仅查询。
  */
 public final class K8sInstanceExample {
