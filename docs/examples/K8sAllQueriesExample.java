@@ -10,6 +10,8 @@ import com.iskycc.k8s.api.K8sResourceClient;
 import com.iskycc.k8s.api.K8sResources;
 import com.iskycc.k8s.api.ListOptions;
 import com.iskycc.k8s.api.model.K8sList;
+import com.iskycc.k8s.api.model.PodSummary;
+import com.iskycc.k8s.api.model.ResourceSummary;
 import com.iskycc.k8s.ssh.SshConfig;
 
 import java.util.ArrayList;
@@ -19,7 +21,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Java 8 完整查询示例，依赖 io.github.iskycc:k8s-tools:1.5.5，客户端内部管理 Redis。
+ * Java 8 完整查询示例，依赖 io.github.iskycc:k8s-tools:1.6.0，客户端内部管理 Redis。
  * SSH 获取/复用 SA -> Redis 缓存 -> 自动发现 API -> 查询；启动说明见 all-queries.md。
  * SSH 初始化可能写入 SA/Secret/RBAC；本示例后续的 API 请求全部为 GET。
  * 放在 docs/examples，不进入本库的发布 jar、sources 或 Javadoc。
@@ -86,6 +88,7 @@ public final class K8sAllQueriesExample {
             K8sAllQueriesExample example = new K8sAllQueriesExample(client, namespace, pageSize);
             example.queryTypedModels();
             example.queryResources();
+            example.querySearch();
             example.queryPaginationAndSelectors();
             example.queryDiscoveryAndCustomResources();
             example.queryRawApi();
@@ -106,6 +109,28 @@ public final class K8sAllQueriesExample {
                     + "），请核对环境配置、SSH/Redis 服务及前面的查询结果。使用 --help 查看配置。");
             System.exit(1);
         }
+    }
+
+    /** 1.6.0 公共搜索方法：始终跨 namespace、自动分页，简易和详细结果均返回全部匹配项。 */
+    private void querySearch() {
+        String keyword = env("K8S_SEARCH_KEYWORD", "kube");
+        ListOptions options = ListOptions.builder().limit(pageSize).build();
+        query("searchPods", () -> showSearch(client.searchPods(keyword, options)));
+        query("searchPodsDetailed", () -> showSearch(client.searchPodsDetailed(keyword, options)));
+        query("searchConfigMaps", () -> showSearch(client.searchConfigMaps(keyword, options)));
+        query("searchConfigMapsDetailed", () -> showSearch(client.searchConfigMapsDetailed(keyword, options)));
+        query("searchServices", () -> showSearch(client.searchServices(keyword, options)));
+        query("searchServicesDetailed", () -> showSearch(client.searchServicesDetailed(keyword, options)));
+    }
+
+    private static void showSearch(List<? extends ResourceSummary> results) {
+        System.out.println("跨全部 namespace 匹配 " + results.size() + " 个对象，最多展示 10 个摘要");
+        for (int i = 0; i < Math.min(results.size(), 10); i++) {
+            ResourceSummary item = results.get(i);
+            System.out.println("  " + item.getNamespace() + "/" + item.getName()
+                    + (item instanceof PodSummary ? " containers=" + ((PodSummary) item).getContainerNames() : ""));
+        }
+        // 详细版保留完整 spec/status/data，但本 Demo 不输出正文或配置值。
     }
 
     /** 旧的简化 POJO 查询入口；null 表示跨命名空间，仅适用于这些 list 快捷方法。 */
@@ -327,6 +352,7 @@ public final class K8sAllQueriesExample {
         System.out.println("必填：K8S_MASTER_IP、K8S_TOOLS_REDIS_URL，及 K8S_SSH_PASSWORD 或 K8S_SSH_KEY。");
         System.out.println("可选：K8S_SSH_PORT=22、K8S_SSH_USER=root、K8S_SSH_KEY_PASSPHRASE。");
         System.out.println("查询：K8S_NAMESPACE=default、K8S_PAGE_SIZE=100、K8S_LABEL_SELECTOR、K8S_FIELD_SELECTOR。");
+        System.out.println("跨 namespace 搜索：K8S_SEARCH_KEYWORD=kube，仅按资源名称包含匹配。");
         System.out.println("自定义资源：K8S_RESOURCE_API_VERSION=apps/v1、K8S_RESOURCE_PLURAL=deployments。");
         System.out.println("无需手填 API 地址或证书。缓存未命中/强制刷新时 SSH 初始化可能创建 SA、Secret 和 RBAC。");
         System.out.println("后续 API 全部 GET；TLS 跳过证书及主机名校验；不输出 token、Redis URI 或 Secret 正文。");

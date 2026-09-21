@@ -1,6 +1,6 @@
 # Redis 凭据缓存与自动接入
 
-Redis 缓存和静态 `K8sApiClient.fromSsh` 从正式版 `1.3.0` 起提供。本文的 **客户端托管 Redis** 入口 `K8sApiClient.builder().redisUrl(...).fromSsh(...)` 从正式版 `1.5.0` 起提供，使用 `io.github.iskycc:k8s-tools:1.5.5`；也可从源码 `mvn clean install` 后引用本地 `1.5.5-SNAPSHOT`。Jedis 固定为 `5.2.0`，使用方无需直接引用它的 API。
+Redis 缓存和静态 `K8sApiClient.fromSsh` 从正式版 `1.3.0` 起提供。本文的 **客户端托管 Redis** 入口 `K8sApiClient.builder().redisUrl(...).fromSsh(...)` 从正式版 `1.5.0` 起提供，使用 `io.github.iskycc:k8s-tools:1.6.0`；也可从源码 `mvn clean install` 后引用本地 `1.6.0-SNAPSHOT`。Jedis 固定为 `5.2.0`，使用方无需直接引用它的 API。
 
 ## 键与读取流程
 
@@ -109,7 +109,7 @@ HTTP 401 可作为重新获取凭据的信号；403 通常表示权限不足，�
 
 ```bash
 export K8S_TOOLS_REDIS_URL='redis://127.0.0.1:6379/0'
-java -cp 'target/k8s-tools-1.5.5-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.6.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --host 192.0.2.10 --user root \
   --password '<SSH 密码>' --password-only
 ```

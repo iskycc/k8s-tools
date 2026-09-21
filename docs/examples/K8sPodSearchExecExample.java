@@ -3,11 +3,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.iskycc.k8s.api.K8sApiClient;
 import com.iskycc.k8s.api.K8sApiException;
-import com.iskycc.k8s.api.K8sResources;
 import com.iskycc.k8s.api.ListOptions;
 import com.iskycc.k8s.api.PodExecException;
 import com.iskycc.k8s.api.PodExecOptions;
 import com.iskycc.k8s.api.PodExecResult;
+import com.iskycc.k8s.api.model.ResourceDetails;
 import com.iskycc.k8s.ssh.SshConfig;
 
 import java.util.ArrayList;
@@ -15,7 +15,7 @@ import java.util.List;
 
 /**
  * Java 8 示例：SSH/Redis 接入 -> 跨全部 namespace 按名称关键词查找 Pod -> 执行整条 shell 命令。
- * 依赖 io.github.iskycc:k8s-tools:1.5.5，运行说明见 pod-search-exec.md。
+ * 依赖 io.github.iskycc:k8s-tools:1.6.0，运行说明见 pod-search-exec.md。
  * 本文件位于 docs，不进入库的发布包。初始化可能写入 SA/Secret/RBAC。
  */
 public final class K8sPodSearchExecExample {
@@ -104,8 +104,12 @@ public final class K8sPodSearchExecExample {
         List<JsonObject> matches = new ArrayList<JsonObject>();
         List<JsonObject> exactMatches = new ArrayList<JsonObject>();
         boolean qualifiedName = keyword.indexOf('/') >= 0;
-        for (JsonObject pod : client.resource(K8sResources.PODS).inAllNamespaces().listAll(ListOptions.builder()
+        String nameKeyword = qualifiedName ? keyword.substring(keyword.indexOf('/') + 1) : keyword;
+        if (nameKeyword.trim().isEmpty()) { throw new ExampleException("namespace/pod 中的 Pod 名称不能为空"); }
+        // SDK 返回所有匹配项；下面的唯一选择与删除过滤仅属于本执行示例。
+        for (ResourceDetails detail : client.searchPodsDetailed(nameKeyword, ListOptions.builder()
                 .fieldSelector("status.phase=Running").limit(100).build())) {
+            JsonObject pod = detail.toJson();
             JsonObject metadata = pod.getAsJsonObject("metadata");
             if (metadata.has("deletionTimestamp") && !metadata.get("deletionTimestamp").isJsonNull()) { continue; }
             String name = metadata.get("name").getAsString();

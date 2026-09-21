@@ -29,7 +29,7 @@ mvn -Dtest=MainDemoTest test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 无集群的 CLI 启动检查
-java -cp 'target/k8s-tools-1.5.5-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.6.0-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
@@ -67,7 +67,8 @@ java -cp 'target/k8s-tools-1.5.5-SNAPSHOT.jar:target/dependency/*' \
 
 ## 通用资源 API 约定
 
-- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，已有凭据查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，当前源码的 SSH/Redis 全查询 main 示例在 [docs/examples/K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)，运行说明见 [docs/examples/all-queries.md](docs/examples/all-queries.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.5.5-SNAPSHOT`。
+- 从 1.6.0 起，`K8sApiClient.searchPods/searchConfigMaps/searchServices` 等 14 类资源提供简易和 `Detailed` 详细版，均跨全部 namespace 返回所有名称包含关键词的 List；不优先精确名称、不要求唯一命中、不默认过滤状态。Pod 简易结果为 `PodSummary`（namespace/name/普通 containerNames），其余为 `ResourceSummary`（namespace/name）；详细版 `ResourceDetails` 提供常用元数据与完整 JSON 的副本，列表项缺少 apiVersion/kind 时只用明确的 ResourceDefinition 补齐，不覆盖服务端已有值。通用 `searchResources[Detailed]` 仅接受 namespaced 定义；选择器与页大小通过 ListOptions 传入，禁止 continueToken；默认每页 100，复用 listAll 的分页完整性规则，错误不能变成空列表或部分结果。空白关键词拒绝，关键词不进入日志；简单结果不得保留完整正文，详细结果 toString 仅显示身份。文档见 [搜索 SDK](docs/resource-search.md)，测试 `ResourceSearchTest` 及真实 `RealKubernetesIT` 搜索场景。
+- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，已有凭据查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，当前源码的 SSH/Redis 全查询 main 示例在 [docs/examples/K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)，运行说明见 [docs/examples/all-queries.md](docs/examples/all-queries.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.6.0-SNAPSHOT`。
 - `ResourceDefinition` 明确 apiVersion、plural、Kind 和作用域；`K8sResources` 是常用常量，不是完整 API 清单。CRD 和其他资源用 Discovery 或显式定义，禁止推测 Kind 的复数。
 - 写入使用完整 Gson JSON，保留未知字段并复制输入；原有简化 POJO 只用于读取，不能拿它们做完整 PUT。PUT 要求 `metadata.resourceVersion`，冲突交由调用方合并。
 - 集群资源不能指定 namespace；命名空间资源的单对象读写和集合删除必须有具体 namespace。只有旧 list 快捷方法把字符串 `all` 解释为跨命名空间，新入口的 `all` 是真实命名空间。
@@ -78,7 +79,7 @@ java -cp 'target/k8s-tools-1.5.5-SNAPSHOT.jar:target/dependency/*' \
 - 从 1.5.5 起提供非交互式 `exec` / `execShell`（1.5.2 不含），独立 nv-websocket-client 2.14 通道、v5/v4 remotecommand，固定 stdin=false/tty=false。argv 保留参数边界；shell 仅显式 /bin/sh -c。默认总时限 30 秒、stdout+stderr 4 MiB，非零退出码返回结果；缺失/非法 Status 必须失败。握手异常保留 HTTP 状态和头，NV 无法提供 chunked 正文时为空；不允许为补正文重放请求。Exec 不重试、不重定向、不触发 TLS 降级；关闭连接不保证终止远端进程。测试 `PodExecTest`、`PodExecSshFallbackTest`、`RedisCredentialsTest`、`LoggingTest` 和真实 `RealKubernetesIT` Exec 用例；MockWebServer/OkHttp/Okio/Kotlin 仅 test scope，不能传递给业务方。详情见 [Pod Exec](docs/pod-exec.md)。
 - Pod Exec 默认 AUTO：有 SSH 配置时先探测并缓存 `/version`，低于 1.31（含 1.31 alpha/beta/rc）执行 SSH/kubectl，否则 WebSocket；1.31 是用户选定的兼容策略门槛，不是 WebSocket 最低支持版本。无 SSH 配置维持直接 WebSocket；单次可选 WEBSOCKET/SSH 跳过探测。每次选定通道后、连接执行前仅打印一条 INFO `Pod exec 执行通道 transport=WEBSOCKET/SSH`，覆盖 AUTO 与手动模式，不受全局 DEBUG 开关影响，不记录命令或凭据。探测失败不执行命令、不缓存失败；执行或握手失败后绝不切换通道重放。版本探测、连接和执行共享总时限，取消保留部分输出与线程中断标记。
 - `fromSsh` 返回客户端在内存中保留 SSH 配置，Redis 命中也必须保留；直接 Builder 可用 `execSshConfig`，MasterInfo 不含 SSH 配置。SSH exec 使用独立连接，外部输入逐参数 shell 转义，当前 API 地址/token/CA/TLS 模式通过 stdin 写入权限 600 的临时 kubeconfig，退出时清理，不借用 master 的管理员 kubeconfig；强制断线不保证远端进程/临时文件立即清理。远端需兼容 kubectl、POSIX shell 和可达的 API 地址；严格模式未给 CA 时远端系统信任库与本地 JVM 不同。SSH 结果是 kubectl stdout/stderr/exit-status，kubectl 权限/连接失败通常为非零结果，不伪造 HTTP 状态异常。此回退行为从 1.5.5 起提供。
-- [Pod 关键词执行示例](docs/examples/pod-search-exec.md)的入口为 [K8sPodSearchExecExample.java](docs/examples/K8sPodSearchExecExample.java)，保留在 docs，不进入发布包。它跨全部 namespace 自动分页查询 Running Pod、跳过删除中对象，名称完整匹配优先，否则要求唯一关键词匹配；跨 namespace 同名也必须报歧义，可用 namespace/pod 精确选择，执行使用匹配对象自身的 namespace；多容器需要明确指定，不能静默选择第一个 Pod 或 sidecar，也不在执行失败后换 Pod 重试。
+- [Pod 关键词执行示例](docs/examples/pod-search-exec.md)的入口为 [K8sPodSearchExecExample.java](docs/examples/K8sPodSearchExecExample.java)，保留在 docs，不进入发布包。它使用 1.6.0 的 searchPodsDetailed 跨全部 namespace 自动分页查询 Running Pod，再由示例跳过删除中对象并选择唯一目标；这些选择规则不属于 SDK 搜索本身。示例名称完整匹配优先，否则要求唯一关键词匹配；跨 namespace 同名也必须报歧义，可用 namespace/pod 精确选择，执行使用匹配对象自身的 namespace；多容器需要明确指定，不能静默选择第一个 Pod 或 sidecar，也不在执行失败后换 Pod 重试。
 
 ## 验证与测试维护
 

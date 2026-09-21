@@ -1,6 +1,6 @@
 # 从 SSH、Redis 到全部查询接口的 main 示例
 
-入口文件：[K8sAllQueriesExample.java](K8sAllQueriesExample.java)。兼容 Java 8，依赖 `io.github.iskycc:k8s-tools:1.5.5`，使用从 `1.5.0` 起提供的客户端托管 Redis 接口；`1.3.0` 不包含此入口。也可直接在本仓库编译运行。
+入口文件：[K8sAllQueriesExample.java](K8sAllQueriesExample.java)。兼容 Java 8，依赖 `io.github.iskycc:k8s-tools:1.6.0`，使用从 `1.5.0` 起提供的客户端托管 Redis 接口；`1.3.0` 不包含此入口。也可直接在本仓库编译运行。
 
 示例执行顺序：配置 SSH → 将 Redis URL 传给客户端 Builder → `fromSsh` 内部读取缓存或通过 SSH 获取凭据并发现 API 地址 → 执行查询。密码模式优先；设置了非空 SSH 密码后不会使用本地私钥。API 地址、token 和证书均无需手工输入。
 
@@ -35,7 +35,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExamp
 java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExample --refresh-cache
 ```
 
-在其他 Maven 项目运行时，使用 [Maven 配置指南](../maven-usage.md#从空项目运行一个查询示例)中的 POM，依赖版本使用 `1.5.5`；将示例复制到 `src/main/java/K8sAllQueriesExample.java`，运行 `mvn compile dependency:copy-dependencies -DincludeScope=runtime`，再使用 `java -cp 'target/classes:target/dependency/*' K8sAllQueriesExample`。Windows 的 classpath 分隔符改为 `;`，并使用双引号。
+在其他 Maven 项目运行时，使用 [Maven 配置指南](../maven-usage.md#从空项目运行一个查询示例)中的 POM，依赖版本使用 `1.6.0`；将示例复制到 `src/main/java/K8sAllQueriesExample.java`，运行 `mvn compile dependency:copy-dependencies -DincludeScope=runtime`，再使用 `java -cp 'target/classes:target/dependency/*' K8sAllQueriesExample`。Windows 的 classpath 分隔符改为 `;`，并使用双引号。
 
 ## 配置
 
@@ -49,6 +49,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExamp
 | `K8S_TOOLS_REDIS_URL` | 必填，例如 `redis://127.0.0.1:6379/0`；支持带认证的 URI 和 `rediss://` |
 | `K8S_NAMESPACE` | `default`，须为具体命名空间；字符串 `all` 在这里是命名空间的实际名称 |
 | `K8S_PAGE_SIZE` | `100`，允许 `1` 至 `1000` |
+| `K8S_SEARCH_KEYWORD` | `kube`，仅用于跨 namespace 搜索段，按资源名称包含匹配 |
 | `K8S_LABEL_SELECTOR` | 可选，例如 `app=nginx`，仅用于选择器查询段 |
 | `K8S_FIELD_SELECTOR` | `status.phase=Running`，仅用于 Pod 选择器查询段 |
 | `K8S_RESOURCE_API_VERSION` | `apps/v1`；可改为 CRD 实际提供的版本，例如 `example.com/v1` |
@@ -66,6 +67,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExamp
 | --- | --- |
 | `queryTypedModels` | `getVersion`、`listNodes`、`listNamespaces`、`listPods`、`listServices`、`listDeployments`；后面三项同时演示指定与跨命名空间查询 |
 | `queryResources` / `queryResource` | `nodes`、`namespaces`、`pods`、`services`、`deployments`、`configMaps`、`secrets`；列表非空时用首个真实名称演示 `exists`、`get` |
+| `querySearch` | `searchPods`、`searchConfigMaps`、`searchServices` 及对应 `Detailed`；全部 namespace、自动分页，只打印身份摘要 |
 | `queryResources` | `resource(K8sResources...)` 查询 SA、CRD；`inNamespace` / `inAllNamespaces`；Pod status、Deployment status/scale 的 `subresource(...).get()` |
 | `queryPaginationAndSelectors` | `list(ListOptions)`、label/field selector、limit、timeout；`listAll` 自动分页；`withContinueToken` 手动逐页遍历及重复 token / resourceVersion 检查 |
 | `queryDiscoveryAndCustomResources` | `discoverApiVersions`、`discoverResources`、`ApiResource.toDefinition`；遍历所有已发现 API 版本的可 list 资源，包含内置资源、CRD 和聚合资源 |
@@ -74,7 +76,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExamp
 
 `list()`、`listAll()` 是不带查询参数的重载；本例统一使用带 `ListOptions` 的形式以展示页大小。各通用资源入口共享同一组查询方法，无需为 StatefulSet、Job、Ingress、Role 等重复编写类。
 
-常用资源与 Discovery 遍历默认只读首页，并输出 `hasMore`；**只有 Pod 的两段分页演示会遍历所有页**，其中 `listAll` 把全部结果放入内存。旧 POJO 快捷方法也不自动翻页。所有列表只展示最多十条摘要，Secret/ConfigMap/CRD 只输出 Kind、namespace、name，不输出数据、注解或完整正文。子资源查询在没有对应 Pod/Deployment 时跳过。
+常用资源与 Discovery 遍历默认只读首页，并输出 `hasMore`；**Pod 的两段分页演示和新增搜索段会遍历所有页**，其中 `listAll` 和搜索方法把全部列表结果放入内存；搜索可用 `K8S_SEARCH_KEYWORD` 配置关键词，详细行为见[搜索 SDK](../resource-search.md)。旧 POJO 快捷方法也不自动翻页。所有列表只展示最多十条摘要，Secret/ConfigMap/CRD 只输出 Kind、namespace、name，不输出数据、注解或完整正文。子资源查询在没有对应 Pod/Deployment 时跳过。
 
 Discovery 的 verbs 是 API 支持的动作，不是 RBAC 权限。示例跳过不支持 list 的资源及子资源集合，遇到 403/404 记录并继续；其他查询错误计入失败，最后退出码为 1。401 立即中止并提示刷新缓存，不自动刷新或重放请求。分页 410、重复 token 或混合版本也会报失败，不从第一页静默重来。该查询示例不执行容器命令；当前源码的非交互式 exec 见 [Pod Exec 指南](../pod-exec.md)。`watch`、`attach`、`port-forward` 尚未提供。
 

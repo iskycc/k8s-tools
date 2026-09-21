@@ -1,6 +1,6 @@
 # 按关键词查找 Pod，再执行命令
 
-完整 main 示例：[K8sPodSearchExecExample.java](K8sPodSearchExecExample.java)，兼容 Java 8，使用 `io.github.iskycc:k8s-tools:1.5.5`。流程为 SSH/Redis 接入 → 跨全部 namespace 查询 Pod → 名称包含关键词匹配 → 选择容器 → `execShell` 执行整条命令并输出结果。
+完整 main 示例：[K8sPodSearchExecExample.java](K8sPodSearchExecExample.java)，兼容 Java 8，使用 `io.github.iskycc:k8s-tools:1.6.0`。流程为 SSH/Redis 接入 → 跨全部 namespace 查询 Pod → 名称包含关键词匹配 → 选择容器 → `execShell` 执行整条命令并输出结果。
 
 ## 已有客户端时的核心调用
 
@@ -20,7 +20,7 @@ System.err.print(result.getStderr());
 System.out.println("退出码：" + result.getExitCode());
 ```
 
-需要导入 `com.google.gson.JsonObject` 以及 `com.iskycc.k8s.api` 下的 `PodExecOptions`、`PodExecResult`。这里的关键词是 **Pod 名称的包含匹配，区分大小写**，例如 `nginx` 匹配 `nginx-7df88c6b4c-abcde`。示例通过 `client.resource(K8sResources.PODS).inAllNamespaces()` 请求 `/api/v1/pods`，跨全部 namespace 用 `status.phase=Running` 查询，再在本地用 `contains` 筛选，并跳过设置了 `deletionTimestamp` 的 Pod；`listAll` 遍历全部分页，结果汇总到内存。
+需要导入 `com.google.gson.JsonObject` 以及 `com.iskycc.k8s.api` 下的 `PodExecOptions`、`PodExecResult`。这里的关键词是 **Pod 名称的包含匹配，区分大小写**，例如 `nginx` 匹配 `nginx-7df88c6b4c-abcde`。示例通过 `client.searchPodsDetailed(keyword, options)` 请求 `/api/v1/pods`，跨全部 namespace 用 `status.phase=Running` 查询并自动分页，再由示例跳过设置了 `deletionTimestamp` 的 Pod。SDK 返回全部名称匹配项；下述唯一目标选择只属于执行示例，公共接口本身不做此限制，详见[搜索 SDK](../resource-search.md)。
 
 完整 Pod 名称优先匹配，但不同 namespace 中的同名 Pod 仍属于多个匹配。没有匹配时结束，匹配多个时列出 `namespace/pod` 并结束，不自动选择第一个或对所有副本执行。把关键词换为其中一个完整的 `namespace/pod`（例如 `production/nginx-abc`）后重新运行即可；即使这样指定，查询仍使用跨 namespace 接口。执行时的 namespace 和 podName 都来自同一个匹配对象的 metadata。这里的查询与执行不是原子操作，Pod 可能在两步之间重建或退出，执行失败不会重新搜索并重放命令。
 
@@ -68,7 +68,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' \
 
 未配置 Redis URL 时不启用缓存；有缓存时由 `fromSsh` 读取，业务代码不引用 Jedis。Redis 密码含特殊字符时需要百分号编码，详见 [Redis 接入](../redis-cache.md#redis-url-带密码的格式)。无 SSH 密码时需设置 `K8S_SSH_KEY`，私钥口令用可选的 `K8S_SSH_KEY_PASSPHRASE`；密码存在时强制密码登录。无需设置 `K8S_NAMESPACE`；即使环境中已有该变量，本示例也不读取它，始终跨全部 namespace 搜索。
 
-在其他 Maven 项目使用时，按 [Maven 配置指南](../maven-usage.md)引用 `1.5.5`，将示例复制到 `src/main/java`；运行 classpath 改为 `target/classes:target/dependency/*`。Windows 使用 `;` 分隔 classpath，并调整为对应 shell 的引号规则。
+在其他 Maven 项目使用时，按 [Maven 配置指南](../maven-usage.md)引用 `1.6.0`，将示例复制到 `src/main/java`；运行 classpath 改为 `target/classes:target/dependency/*`。Windows 使用 `;` 分隔 classpath，并调整为对应 shell 的引号规则。
 
 ## 执行结果与边界
 

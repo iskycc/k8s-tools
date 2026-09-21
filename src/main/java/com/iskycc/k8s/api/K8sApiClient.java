@@ -16,6 +16,9 @@ import com.iskycc.k8s.api.model.K8sList;
 import com.iskycc.k8s.api.model.Namespace;
 import com.iskycc.k8s.api.model.Node;
 import com.iskycc.k8s.api.model.Pod;
+import com.iskycc.k8s.api.model.PodSummary;
+import com.iskycc.k8s.api.model.ResourceSummary;
+import com.iskycc.k8s.api.model.ResourceDetails;
 import com.iskycc.k8s.api.model.Service;
 import com.iskycc.k8s.api.model.VersionInfo;
 import com.iskycc.k8s.ssh.MasterInfo;
@@ -310,6 +313,214 @@ public class K8sApiClient {
                 ? "/apis/apps/v1/deployments"
                 : "/apis/apps/v1/namespaces/" + K8sResourceClient.pathSegment(namespace) + "/deployments";
         return parseList(getRaw(path), Deployment.class);
+    }
+
+    // ==================== 跨全部 namespace 的关键词搜索（1.6.0 起） ====================
+
+    /**
+     * 名称包含关键词的全部匹配资源，简易结果仅保留 namespace/name。
+     * 区分大小写，不做完整名称优先或状态过滤；默认每页 100 条，无匹配返回空 List。
+     */
+    public List<ResourceSummary> searchResources(ResourceDefinition definition, String keyword) {
+        return searchResources(definition, keyword, null);
+    }
+
+    /** 自定义选择器和分页大小；自动遍历所有页，禁止从 continueToken 中途开始。 */
+    public List<ResourceSummary> searchResources(ResourceDefinition definition, String keyword, ListOptions options) {
+        return ResourceSearch.search(this, definition, keyword, options, ResourceSummary::fromJson);
+    }
+
+    /** 详细版保留完整 JSON 与常用元数据；仅接受命名空间资源定义。 */
+    public List<ResourceDetails> searchResourcesDetailed(ResourceDefinition definition, String keyword) {
+        return searchResourcesDetailed(definition, keyword, null);
+    }
+
+    /** 详细搜索与简易搜索使用同样的匹配和分页规则；错误不转换为空结果。 */
+    public List<ResourceDetails> searchResourcesDetailed(ResourceDefinition definition, String keyword, ListOptions options) {
+        return ResourceSearch.search(this, definition, keyword, options,
+                item -> new ResourceDetails(item, definition.getApiVersion(), definition.getKind()));
+    }
+
+    /** 跨全部 namespace 搜索 Pod，返回全部简易结果（含普通容器名称）。 */
+    public List<PodSummary> searchPods(String keyword) { return searchPods(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<PodSummary> searchPods(String keyword, ListOptions options) {
+        return ResourceSearch.search(this, K8sResources.PODS, keyword, options, PodSummary::fromJson);
+    }
+    /** 跨全部 namespace 搜索 Pod，返回全部详细结果。 */
+    public List<ResourceDetails> searchPodsDetailed(String keyword) { return searchPodsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchPodsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.PODS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 ConfigMap，返回全部简易结果。 */
+    public List<ResourceSummary> searchConfigMaps(String keyword) { return searchConfigMaps(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchConfigMaps(String keyword, ListOptions options) {
+        return searchResources(K8sResources.CONFIG_MAPS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 ConfigMap，返回全部详细结果。 */
+    public List<ResourceDetails> searchConfigMapsDetailed(String keyword) { return searchConfigMapsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchConfigMapsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.CONFIG_MAPS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 Service，返回全部简易结果。 */
+    public List<ResourceSummary> searchServices(String keyword) { return searchServices(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchServices(String keyword, ListOptions options) {
+        return searchResources(K8sResources.SERVICES, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 Service，返回全部详细结果。 */
+    public List<ResourceDetails> searchServicesDetailed(String keyword) { return searchServicesDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchServicesDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.SERVICES, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 Deployment，返回全部简易结果。 */
+    public List<ResourceSummary> searchDeployments(String keyword) { return searchDeployments(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchDeployments(String keyword, ListOptions options) {
+        return searchResources(K8sResources.DEPLOYMENTS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 Deployment，返回全部详细结果。 */
+    public List<ResourceDetails> searchDeploymentsDetailed(String keyword) { return searchDeploymentsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchDeploymentsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.DEPLOYMENTS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 StatefulSet，返回全部简易结果。 */
+    public List<ResourceSummary> searchStatefulSets(String keyword) { return searchStatefulSets(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchStatefulSets(String keyword, ListOptions options) {
+        return searchResources(K8sResources.STATEFUL_SETS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 StatefulSet，返回全部详细结果。 */
+    public List<ResourceDetails> searchStatefulSetsDetailed(String keyword) { return searchStatefulSetsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchStatefulSetsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.STATEFUL_SETS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 DaemonSet，返回全部简易结果。 */
+    public List<ResourceSummary> searchDaemonSets(String keyword) { return searchDaemonSets(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchDaemonSets(String keyword, ListOptions options) {
+        return searchResources(K8sResources.DAEMON_SETS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 DaemonSet，返回全部详细结果。 */
+    public List<ResourceDetails> searchDaemonSetsDetailed(String keyword) { return searchDaemonSetsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchDaemonSetsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.DAEMON_SETS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 ReplicaSet，返回全部简易结果。 */
+    public List<ResourceSummary> searchReplicaSets(String keyword) { return searchReplicaSets(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchReplicaSets(String keyword, ListOptions options) {
+        return searchResources(K8sResources.REPLICA_SETS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 ReplicaSet，返回全部详细结果。 */
+    public List<ResourceDetails> searchReplicaSetsDetailed(String keyword) { return searchReplicaSetsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchReplicaSetsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.REPLICA_SETS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 Job，返回全部简易结果。 */
+    public List<ResourceSummary> searchJobs(String keyword) { return searchJobs(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchJobs(String keyword, ListOptions options) {
+        return searchResources(K8sResources.JOBS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 Job，返回全部详细结果。 */
+    public List<ResourceDetails> searchJobsDetailed(String keyword) { return searchJobsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchJobsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.JOBS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 CronJob，返回全部简易结果。 */
+    public List<ResourceSummary> searchCronJobs(String keyword) { return searchCronJobs(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchCronJobs(String keyword, ListOptions options) {
+        return searchResources(K8sResources.CRON_JOBS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 CronJob，返回全部详细结果。 */
+    public List<ResourceDetails> searchCronJobsDetailed(String keyword) { return searchCronJobsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchCronJobsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.CRON_JOBS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 Ingress，返回全部简易结果。 */
+    public List<ResourceSummary> searchIngresses(String keyword) { return searchIngresses(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchIngresses(String keyword, ListOptions options) {
+        return searchResources(K8sResources.INGRESSES, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 Ingress，返回全部详细结果。 */
+    public List<ResourceDetails> searchIngressesDetailed(String keyword) { return searchIngressesDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchIngressesDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.INGRESSES, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 PVC，返回全部简易结果。 */
+    public List<ResourceSummary> searchPersistentVolumeClaims(String keyword) { return searchPersistentVolumeClaims(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchPersistentVolumeClaims(String keyword, ListOptions options) {
+        return searchResources(K8sResources.PERSISTENT_VOLUME_CLAIMS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 PVC，返回全部详细结果。 */
+    public List<ResourceDetails> searchPersistentVolumeClaimsDetailed(String keyword) { return searchPersistentVolumeClaimsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchPersistentVolumeClaimsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.PERSISTENT_VOLUME_CLAIMS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 Secret，返回全部简易结果。 */
+    public List<ResourceSummary> searchSecrets(String keyword) { return searchSecrets(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchSecrets(String keyword, ListOptions options) {
+        return searchResources(K8sResources.SECRETS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 Secret，返回全部详细结果。 */
+    public List<ResourceDetails> searchSecretsDetailed(String keyword) { return searchSecretsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchSecretsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.SECRETS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 ServiceAccount，返回全部简易结果。 */
+    public List<ResourceSummary> searchServiceAccounts(String keyword) { return searchServiceAccounts(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchServiceAccounts(String keyword, ListOptions options) {
+        return searchResources(K8sResources.SERVICE_ACCOUNTS, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 ServiceAccount，返回全部详细结果。 */
+    public List<ResourceDetails> searchServiceAccountsDetailed(String keyword) { return searchServiceAccountsDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchServiceAccountsDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.SERVICE_ACCOUNTS, keyword, options);
+    }
+
+    /** 跨全部 namespace 搜索 NetworkPolicy，返回全部简易结果。 */
+    public List<ResourceSummary> searchNetworkPolicies(String keyword) { return searchNetworkPolicies(keyword, null); }
+    /** 简易版，允许通过 ListOptions 筛选和设置每页数量。 */
+    public List<ResourceSummary> searchNetworkPolicies(String keyword, ListOptions options) {
+        return searchResources(K8sResources.NETWORK_POLICIES, keyword, options);
+    }
+    /** 跨全部 namespace 搜索 NetworkPolicy，返回全部详细结果。 */
+    public List<ResourceDetails> searchNetworkPoliciesDetailed(String keyword) { return searchNetworkPoliciesDetailed(keyword, null); }
+    /** 详细版，包含 metadata、spec/status 及服务端提供的其他字段。 */
+    public List<ResourceDetails> searchNetworkPoliciesDetailed(String keyword, ListOptions options) {
+        return searchResourcesDetailed(K8sResources.NETWORK_POLICIES, keyword, options);
     }
 
     // ==================== 通用资源与 Discovery ====================

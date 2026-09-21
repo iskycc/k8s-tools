@@ -1,6 +1,6 @@
 # 在 Pod 容器中执行命令
 
-从 **`1.5.5`** 起提供 `K8sApiClient.exec` / `execShell`、版本判断及 SSH 回退。业务项目引用 `io.github.iskycc:k8s-tools:1.5.5`，配置见 [Maven 指南](maven-usage.md)；`1.5.2` 不含这些接口。从源码构建时可执行 `mvn clean install` 并引用本地 `1.5.5-SNAPSHOT`，本次不发布该快照。
+从 **`1.5.5`** 起提供 `K8sApiClient.exec` / `execShell`、版本判断及 SSH 回退。业务项目引用 `io.github.iskycc:k8s-tools:1.6.0`，配置见 [Maven 指南](maven-usage.md)；`1.5.2` 不含这些接口。从源码构建时可执行 `mvn clean install` 并引用本地 `1.6.0-SNAPSHOT`，本次不发布该快照。
 
 需要先通过关键词查找 Pod，再执行命令或容器内测试脚本时，参见[完整 main 示例](examples/pod-search-exec.md)与 [Java 源码](examples/K8sPodSearchExecExample.java)。
 

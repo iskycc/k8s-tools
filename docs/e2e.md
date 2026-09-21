@@ -36,6 +36,7 @@ SSH 服务监听 `127.0.0.1:22222`，使用临时用户 `k8se2e`；Redis 监听 
 | CRUD | Namespace、ConfigMap、Secret、Service、自定义资源；用 kubectl 独立核对 ConfigMap 和 Deployment 的实际状态 |
 | Patch / Apply | JSON Patch、Merge Patch、Strategic Merge Patch、Server-Side Apply；dry-run 不落库 |
 | 选择器与分页 | label/field selector、limit、continue、自动分页、跨 namespace list、按标签集合删除 |
+| 搜索 SDK | 两个 namespace 创建同名 Pod、ConfigMap、Service、Deployment，以 limit=1 搜索；简易与详细版均返回全部匹配，核对容器名称、配置数据、端口、副本数及无匹配空列表 |
 | Discovery / CRD | 从 Discovery 定位新建 CRD；schema 校验、未知字段保留、资源 CRUD、status 子资源 |
 | 错误与权限 | 401、403、404、409、严格字段校验 400、CRD schema 校验 422；受限 SA 的 TokenRequest 和 SelfSubjectAccessReview |
 | TLS | 默认忽略自签名证书；发现的 CA 可用于严格校验；JVM 不信任且关闭降级时请求失败 |

@@ -1,6 +1,6 @@
 # Java 工具库：资源增删查改
 
-本文使用正式版坐标 `io.github.iskycc:k8s-tools:1.5.5`，发布完成后可从 Maven Central 引用，无需配置额外仓库。通用资源 CRUD 从 `1.1.0` 起提供，仅密码 SSH 模式从 `1.2.0` 起提供；旧版 `1.0.0` 只有查询接口。当前开发构建为 `1.5.5-SNAPSHOT`，可在本仓库运行 `mvn clean install` 安装到本地；本次不发布新快照，远端快照使用规则见[发布指南](publishing.md#发布与使用快照)。
+本文使用正式版坐标 `io.github.iskycc:k8s-tools:1.6.0`，发布完成后可从 Maven Central 引用，无需配置额外仓库。通用资源 CRUD 从 `1.1.0` 起提供，仅密码 SSH 模式从 `1.2.0` 起提供；旧版 `1.0.0` 只有查询接口。当前开发构建为 `1.6.0-SNAPSHOT`，可在本仓库运行 `mvn clean install` 安装到本地；本次不发布新快照，远端快照使用规则见[发布指南](publishing.md#发布与使用快照)。
 
 首次接入先阅读 [Maven 坐标与接入配置](maven-usage.md)，其中提供完整 POM 和可编译运行的[查询示例](examples/K8sReadExample.java)。本文的 Java 代码块是按场景选择的调用片段，放入业务方法中使用；后续片段复用连接示例中的 `client` 和 `configMaps`。创建、删除等示例会修改目标集群，不应把全文作为一个脚本顺序执行。
 
@@ -9,6 +9,7 @@
 | 要完成的任务 | 对应章节 |
 | --- | --- |
 | 配置地址、token、CA 或 SSH 初始化 | [连接与公共入口](#连接与公共入口) |
+| 跨全部 namespace 按关键词搜索资源 | [搜索 SDK](resource-search.md)：简易/详细 List，支持 Pod、ConfigMap、Service 等（1.6.0 起） |
 | 查版本、节点、Pod 等现有资源 | [查询与资源入口选择](#查询与资源入口选择) |
 | 创建、更新、删除资源 | [CRUD 示例](#创建读取修改删除示例)、[Deployment 与 Service](#deployment-与-service-示例) |
 | 选择器、分页、跨命名空间 | [选择器、分页和作用域](#选择器分页和作用域) |
@@ -29,9 +30,9 @@ K8sApiClient cachedClient = K8sApiClient.builder()
         .fromSsh(sshConfig);
 ```
 
-`sshConfig` 为 `SshConfig` 实例。客户端负责缓存判断、连接创建和关闭，调用方无需引用 Jedis 或缓存类。`fromSsh` 自动发现 API 地址，默认跳过证书和主机名校验；高级获取选项使用 `fromSsh(sshConfig, options)`，严格 TLS 同时配置 `insecureSkipTlsVerify(false).tlsAutoFallback(false)`。正式版使用 `1.5.5`；从源码构建时先执行 `mvn clean install` 并依赖本地 `1.5.5-SNAPSHOT`，详见 [Redis 缓存与自动接入](redis-cache.md)。
+`sshConfig` 为 `SshConfig` 实例。客户端负责缓存判断、连接创建和关闭，调用方无需引用 Jedis 或缓存类。`fromSsh` 自动发现 API 地址，默认跳过证书和主机名校验；高级获取选项使用 `fromSsh(sshConfig, options)`，严格 TLS 同时配置 `insecureSkipTlsVerify(false).tlsAutoFallback(false)`。正式版使用 `1.6.0`；从源码构建时先执行 `mvn clean install` 并依赖本地 `1.6.0-SNAPSHOT`，详见 [Redis 缓存与自动接入](redis-cache.md)。
 
-已发布的静态 `K8sApiClient.fromSsh(sshConfig, options)` 与外部缓存配置入口继续兼容，从 `1.3.0` 起提供；`1.2.1` 及之前版本不包含。下文统一使用正式版 `1.5.5`。
+已发布的静态 `K8sApiClient.fromSsh(sshConfig, options)` 与外部缓存配置入口继续兼容，从 `1.3.0` 起提供；`1.2.1` 及之前版本不包含。下文统一使用正式版 `1.6.0`。
 
 已有 API Server 地址和 token 时，直接创建客户端，无需 SSH，也不会创建 ServiceAccount 或 RBAC：
 
@@ -116,7 +117,7 @@ K8sApiClient strictSshClient = K8sApiClient.builder()
 
 ### 仅使用密码登录 SSH 机器
 
-**本节的 `passwordOnly(true)` 和密码隔离行为从 `1.2.0` 起提供。** `1.1.0` 及之前的远端快照不包含这些改动；使用方应引用 `1.5.5`，或从当前源码执行 `mvn clean install` 后引用本地 `1.5.5-SNAPSHOT`。
+**本节的 `passwordOnly(true)` 和密码隔离行为从 `1.2.0` 起提供。** `1.1.0` 及之前的远端快照不包含这些改动；使用方应引用 `1.6.0`，或从当前源码执行 `mvn clean install` 后引用本地 `1.6.0-SNAPSHOT`。
 
 ```java
 com.iskycc.k8s.ssh.SshConfig passwordSshConfig = com.iskycc.k8s.ssh.SshConfig.builder()

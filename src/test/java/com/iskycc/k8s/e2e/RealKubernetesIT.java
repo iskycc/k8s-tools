@@ -17,6 +17,9 @@ import com.iskycc.k8s.api.PodExecResult;
 import com.iskycc.k8s.api.ResourceDefinition;
 import com.iskycc.k8s.api.WriteOptions;
 import com.iskycc.k8s.api.model.K8sList;
+import com.iskycc.k8s.api.model.PodSummary;
+import com.iskycc.k8s.api.model.ResourceDetails;
+import com.iskycc.k8s.api.model.ResourceSummary;
 import com.iskycc.k8s.ssh.ServiceTokenFetcher;
 import com.iskycc.k8s.ssh.SshConfig;
 import org.junit.After;
@@ -79,6 +82,69 @@ public class RealKubernetesIT {
             client.namespaces().deleteIfExists(namespace, DeleteOptions.builder()
                     .propagationPolicy(DeleteOptions.PropagationPolicy.Background).build());
         }
+    }
+
+    @Test
+    public void resourceSearchReturnsEveryMatchAcrossNamespacesWithSimpleAndDetailedResults() {
+        String secondNamespace = namespace + "-other";
+        String name = "search-" + UUID.randomUUID().toString().substring(0, 8);
+        client.namespaces().create(json("{\"metadata\":{\"name\":\"" + secondNamespace + "\"}}"));
+        try {
+            for (String ns : Arrays.asList(namespace, secondNamespace)) {
+                String metadata = "\"metadata\":{\"name\":\"" + name
+                        + "\",\"labels\":{\"search-test\":\"" + name + "\"}}";
+                client.pods(ns).create(json("{" + metadata + ",\"spec\":{\"terminationGracePeriodSeconds\":0,"
+                        + "\"containers\":[{\"name\":\"app\",\"image\":\"registry.k8s.io/pause:3.10\"},"
+                        + "{\"name\":\"sidecar\",\"image\":\"registry.k8s.io/pause:3.10\"}]}}"));
+                client.configMaps(ns).create(json("{" + metadata + ",\"data\":{\"setting\":\"enabled\"}}"));
+                client.services(ns).create(json("{" + metadata + ",\"spec\":{\"selector\":{\"search-test\":\""
+                        + name + "\"},\"ports\":[{\"port\":80,\"targetPort\":8080}]}}"));
+                client.deployments(ns).create(json("{" + metadata + ",\"spec\":{\"replicas\":0,"
+                        + "\"selector\":{\"matchLabels\":{\"app\":\"" + name + "\"}},"
+                        + "\"template\":{\"metadata\":{\"labels\":{\"app\":\"" + name + "\"}},"
+                        + "\"spec\":{\"containers\":[{\"name\":\"app\",\"image\":\"registry.k8s.io/pause:3.10\"}]}}}}"));
+            }
+            ListOptions options = ListOptions.builder().limit(1).labelSelector("search-test=" + name).build();
+            List<PodSummary> pods = client.searchPods(name, options);
+            assertSearchIdentities(pods, name, secondNamespace);
+            for (PodSummary pod : pods) { assertEquals(Arrays.asList("app", "sidecar"), pod.getContainerNames()); }
+            List<ResourceDetails> podDetails = client.searchPodsDetailed(name, options);
+            assertSearchIdentities(podDetails, name, secondNamespace);
+            for (ResourceDetails pod : podDetails) {
+                assertEquals(2, pod.getSpec().getAsJsonArray("containers").size());
+                assertEquals("Pod", pod.getKind());
+                assertTrue(pod.getResourceVersion() != null);
+            }
+            assertSearchIdentities(client.searchConfigMaps(name, options), name, secondNamespace);
+            List<ResourceDetails> maps = client.searchConfigMapsDetailed(name, options);
+            assertSearchIdentities(maps, name, secondNamespace);
+            for (ResourceDetails map : maps) { assertEquals("enabled", map.getData().get("setting").getAsString()); }
+            assertSearchIdentities(client.searchServices(name, options), name, secondNamespace);
+            List<ResourceDetails> services = client.searchServicesDetailed(name, options);
+            assertSearchIdentities(services, name, secondNamespace);
+            for (ResourceDetails service : services) {
+                assertEquals(80, service.getSpec().getAsJsonArray("ports").get(0).getAsJsonObject().get("port").getAsInt());
+            }
+            assertSearchIdentities(client.searchDeployments(name, options), name, secondNamespace);
+            List<ResourceDetails> deployments = client.searchDeploymentsDetailed(name, options);
+            assertSearchIdentities(deployments, name, secondNamespace);
+            for (ResourceDetails deployment : deployments) { assertEquals(0, deployment.getSpec().get("replicas").getAsInt()); }
+            assertTrue(client.searchPods(name + "-absent", options).isEmpty());
+        } finally {
+            client.namespaces().deleteIfExists(secondNamespace, DeleteOptions.builder()
+                    .propagationPolicy(DeleteOptions.PropagationPolicy.Background).build());
+        }
+    }
+
+    private void assertSearchIdentities(List<? extends ResourceSummary> results, String name, String secondNamespace) {
+        assertEquals(2, results.size());
+        List<String> namespaces = new ArrayList<String>();
+        for (ResourceSummary result : results) {
+            assertEquals(name, result.getName());
+            namespaces.add(result.getNamespace());
+        }
+        assertTrue(namespaces.contains(namespace));
+        assertTrue(namespaces.contains(secondNamespace));
     }
 
     @Test
