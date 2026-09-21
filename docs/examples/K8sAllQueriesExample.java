@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Java 8 完整查询示例，依赖 io.github.iskycc:k8s-tools:1.5.0，客户端内部管理 Redis。
+ * Java 8 完整查询示例，依赖 io.github.iskycc:k8s-tools:1.5.2，客户端内部管理 Redis。
  * SSH 获取/复用 SA -> Redis 缓存 -> 自动发现 API -> 查询；启动说明见 all-queries.md。
  * SSH 初始化可能写入 SA/Secret/RBAC；本示例后续的 API 请求全部为 GET。
  * 放在 docs/examples，不进入本库的发布 jar、sources 或 Javadoc。

@@ -8,6 +8,9 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
 import com.iskycc.k8s.K8sToolsException;
+import com.iskycc.k8s.internal.LogSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.iskycc.k8s.api.model.Deployment;
 import com.iskycc.k8s.api.model.K8sList;
 import com.iskycc.k8s.api.model.Namespace;
@@ -63,6 +66,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 使用 Bearer Token 调用 Kubernetes REST API，兼容 Java 8，支持通用资源增删查改与 Discovery。
@@ -85,6 +89,8 @@ import java.util.Map;
  */
 public class K8sApiClient {
 
+    private static final Logger LOG = LoggerFactory.getLogger(K8sApiClient.class);
+    private static final AtomicLong REQUEST_IDS = new AtomicLong();
     private static final String USER_AGENT = "iskycc-k8s-tools/1.1";
 
     private final String apiServer;
@@ -108,6 +114,9 @@ public class K8sApiClient {
         this.insecureConfigured = b.insecureSkipTlsVerify;
         this.tlsSettings = new TlsSettings(buildSslContext(b),
                 b.insecureSkipTlsVerify ? INSECURE_HOSTNAME_VERIFIER : new DefaultHostnameVerifier());
+        LOG.info("API 客户端就绪 server={} tls={} autoFallback={} connectTimeoutMs={} readTimeoutMs={}",
+                LogSupport.endpoint(apiServer), insecureConfigured ? "insecure" : "verify",
+                tlsAutoFallback, connectTimeoutMs, readTimeoutMs);
     }
 
     public static Builder builder() {
@@ -302,15 +311,38 @@ public class K8sApiClient {
             throw new IllegalArgumentException("contentType is required for a request body");
         }
         URI uri = requestUri(path, query);
+        long requestId = REQUEST_IDS.incrementAndGet();
+        long started = System.nanoTime();
+        String server = LogSupport.endpoint(apiServer);
+        String route = LogSupport.field(uri.getRawPath());
+        LOG.debug("API 请求开始 requestId={} method={} server={} path={}", requestId, verb, server, route);
         try {
-            return doRequest(verb, uri, body, contentType);
-        } catch (K8sApiException e) {
-            if (("GET".equals(verb) || "HEAD".equals(verb))
-                    && tlsAutoFallback && !insecureConfigured && !degradedToInsecure
-                    && e.getStatusCode() == -1 && isTlsError(e)) {
-                degradeToInsecure();
-                return doRequest(verb, uri, body, contentType);
+            ApiResponse response;
+            try {
+                response = doRequest(verb, uri, body, contentType);
+            } catch (K8sApiException e) {
+                if (("GET".equals(verb) || "HEAD".equals(verb))
+                        && tlsAutoFallback && !insecureConfigured && !degradedToInsecure
+                        && e.getStatusCode() == -1 && isTlsError(e)) {
+                    LOG.warn("TLS 校验失败，自动降级并重试；后续请求也跳过校验 requestId={} server={} errorType={}",
+                            requestId, server, LogSupport.errorType(e));
+                    degradeToInsecure();
+                    response = doRequest(verb, uri, body, contentType);
+                } else {
+                    throw e;
+                }
             }
+            LOG.debug("API 请求完成 requestId={} method={} server={} path={} status={} auditId={} elapsedMs={}",
+                    requestId, verb, server, route, response.getStatusCode(),
+                    LogSupport.auditId(response.getHeaders()), LogSupport.elapsedMs(started));
+            return response;
+        } catch (K8sApiException e) {
+            // 404 是 exists/deleteIfExists 的正常分支；其余失败默认可见。正文与异常消息可能含 Secret。
+            String format = "API 请求失败 requestId={} method={} server={} path={} status={} auditId={} elapsedMs={} errorType={}";
+            Object[] details = {requestId, verb, server, route, e.getStatusCode(),
+                    LogSupport.auditId(e.getResponseHeaders()), LogSupport.elapsedMs(started), LogSupport.errorType(e)};
+            if (e.getStatusCode() == 404) { LOG.debug(format, details); }
+            else { LOG.warn(format, details); }
             throw e;
         }
     }
@@ -596,6 +628,10 @@ public class K8sApiClient {
             }
             ServiceTokenFetcher.Options effective = options == null
                     ? new ServiceTokenFetcher.Options() : options.copy();
+            long started = System.nanoTime();
+            LOG.info("SSH 客户端初始化 host={} managedRedis={} redisEndpoint={} refreshCache={}",
+                    LogSupport.field(config.getHost()), redisUri != null,
+                    redisUri == null ? "-" : LogSupport.endpoint(redisUri.toString()), refreshCache);
             // 仅初始化期间需要 Redis；返回的客户端不持有池或 Redis 密码。
             try (JedisPool pool = redisUri == null ? null : new JedisPool(redisUri)) {
                 if (pool != null) { effective.redisCache(new RedisServiceTokenCache(pool)); }
@@ -607,6 +643,13 @@ public class K8sApiClient {
                             .insecureSkipTlsVerify(skipTls).tlsAutoFallback(tlsAutoFallback)
                             .connectTimeoutMs(connectTimeoutMs).readTimeoutMs(readTimeoutMs).build();
                 }
+            } catch (RuntimeException e) {
+                LOG.error("SSH 客户端初始化失败 host={} elapsedMs={} errorType={}",
+                        LogSupport.field(config.getHost()), LogSupport.elapsedMs(started), LogSupport.errorType(e));
+                throw e;
+            } finally {
+                LOG.debug("SSH 客户端初始化结束 host={} elapsedMs={}",
+                        LogSupport.field(config.getHost()), LogSupport.elapsedMs(started));
             }
         }
 

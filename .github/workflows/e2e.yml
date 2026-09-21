@@ -1,0 +1,77 @@
+name: Real Kubernetes E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Kubernetes 1.37 / Java ${{ matrix.java }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['8', '21']
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      - name: Start disposable Kubernetes, SSH and Redis
+        run: bash scripts/e2e/setup-kind.sh
+
+      - name: Verify library against real services
+        run: mvn --batch-mode --no-transfer-progress -Preal-e2e clean verify dependency:copy-dependencies -DincludeScope=runtime
+
+      - name: Run the full query main demo and CLI
+        run: |
+          export K8S_MASTER_IP=127.0.0.1 K8S_SSH_PORT=22222 K8S_SSH_USER=k8se2e
+          export K8S_SSH_PASSWORD="$E2E_SSH_PASSWORD" K8S_TOOLS_REDIS_URL="$E2E_REDIS_URL"
+          mkdir -p target/e2e-demo target/e2e-diagnostics
+          javac -encoding UTF-8 -source 8 -target 8 -cp 'target/classes:target/dependency/*' \
+            -d target/e2e-demo docs/examples/K8sAllQueriesExample.java
+          java -cp 'target/e2e-demo:target/classes:target/dependency/*' K8sAllQueriesExample \
+            > target/e2e-diagnostics/query-demo.txt
+          java -cp 'target/classes:target/dependency/*' com.iskycc.k8s.Main \
+            --host 127.0.0.1 --port 22222 --user k8se2e --password "$E2E_SSH_PASSWORD" --password-only \
+            > target/e2e-diagnostics/cli.txt
+
+      - name: Collect test summary and cluster diagnostics
+        if: always()
+        run: bash scripts/e2e/diagnostics.sh
+
+      - name: Upload E2E reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-e2e-java-${{ matrix.java }}
+          path: |
+            target/surefire-reports/*.xml
+            target/surefire-reports/*.txt
+            target/failsafe-reports/*.xml
+            target/failsafe-reports/*.txt
+            target/e2e-diagnostics/*.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop disposable services
+        if: always()
+        run: bash scripts/e2e/cleanup-kind.sh

@@ -1,6 +1,6 @@
 # 工具库完整性核对
 
-核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.5.0-SNAPSHOT`。
+核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.5.2-SNAPSHOT`。
 
 ## 1.5.0 客户端托管 Redis
 
@@ -37,7 +37,7 @@
 | TLS | 不支持多个 CA，所有请求按 GET 设计 | 支持 PEM CA bundle；写入不自动降级/重放；保留旧读请求兼容行为 |
 | SSH 凭据初始化 | token Secret 创建时缺少必需 SA 注解 | 提交带注解的完整 Secret JSON；AlreadyExists 时补注解；mock 拒绝旧创建命令 |
 | SSH 输入 | 资源名和路径直接拼命令 | 资源名/重试参数先校验，远端绝对路径与 JSON 正文做 shell 引号处理 |
-| 下游依赖 | 库传递依赖带入 NOP 日志实现 | NOP 改为 optional，使用者自行选择日志实现 |
+| 下游依赖 | 库传递依赖带入 NOP 日志实现 | 日志实现保持 optional；1.5.2 的 CLI 使用 Simple，使用者自行选择 provider |
 | 使用文档 | 只有 CLI 和简化列表查询 | [Java API 指南](library-api.md)，包含 CRUD、分页、CRD、Apply、子资源示例 |
 
 ## “所有资源”的准确范围
@@ -77,6 +77,6 @@ mvn clean verify
 
 `K8sResourceClientTest` 使用真实 loopback HTTPS 连接和预设服务器响应，核对 HTTP 方法、路径、查询编码、媒体类型、完整 JSON 正文、分页和异常传播。覆盖 core/group API、namespace/cluster 范围、CRD Discovery、三种 Patch、Apply、删除参数和 JSON 子资源，同时验证写请求断线后不会重发、重定向不转发 token、未信任 TLS 写入不降级。
 
-SSH 模拟器检查 Secret 清单在创建时包含 SA 注解，覆盖新建、复用、重建、AlreadyExists 和禁用重建；其验证范围仍是本地模拟。**没有在真实集群验证完整 Kubernetes schema、准入、RBAC、控制器或全部 API 版本**，测试 fixture 不是版本兼容认证。
+SSH 模拟器检查 Secret 清单在创建时包含 SA 注解，覆盖新建、复用、重建、AlreadyExists 和禁用重建；其验证范围仍是本地模拟，测试 fixture 不是版本兼容认证。新增的 [真实 Kubernetes E2E](e2e.md) 在 kind 中验证代表性的 schema、RBAC、token/Deployment 控制器和 REST 调用；结果以对应 Actions 作业为准，不覆盖所有准入配置、资源或 API 版本。
 
 后续发布前需在独立副本将版本设为正式值，生成 sources/Javadoc 并使用临时测试 keyring 验证签名。实际运行结果应以 `target/surefire-reports` 和发布流水线为准；已经发布的正式版本不可覆盖。

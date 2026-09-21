@@ -1,6 +1,6 @@
 # 从 SSH、Redis 到全部查询接口的 main 示例
 
-入口文件：[K8sAllQueriesExample.java](K8sAllQueriesExample.java)。兼容 Java 8，依赖 `io.github.iskycc:k8s-tools:1.5.0`，使用该版本新增的客户端托管 Redis 接口；`1.3.0` 不包含此入口。也可直接在本仓库编译运行。
+入口文件：[K8sAllQueriesExample.java](K8sAllQueriesExample.java)。兼容 Java 8，依赖 `io.github.iskycc:k8s-tools:1.5.2`，使用从 `1.5.0` 起提供的客户端托管 Redis 接口；`1.3.0` 不包含此入口。也可直接在本仓库编译运行。
 
 示例执行顺序：配置 SSH → 将 Redis URL 传给客户端 Builder → `fromSsh` 内部读取缓存或通过 SSH 获取凭据并发现 API 地址 → 执行查询。密码模式优先；设置了非空 SSH 密码后不会使用本地私钥。API 地址、token 和证书均无需手工输入。
 
@@ -35,7 +35,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExamp
 java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExample --refresh-cache
 ```
 
-在其他 Maven 项目运行时，使用 [Maven 配置指南](../maven-usage.md#从空项目运行一个查询示例)中的 POM，依赖版本使用 `1.5.0`；将示例复制到 `src/main/java/K8sAllQueriesExample.java`，运行 `mvn compile dependency:copy-dependencies -DincludeScope=runtime`，再使用 `java -cp 'target/classes:target/dependency/*' K8sAllQueriesExample`。Windows 的 classpath 分隔符改为 `;`，并使用双引号。
+在其他 Maven 项目运行时，使用 [Maven 配置指南](../maven-usage.md#从空项目运行一个查询示例)中的 POM，依赖版本使用 `1.5.2`；将示例复制到 `src/main/java/K8sAllQueriesExample.java`，运行 `mvn compile dependency:copy-dependencies -DincludeScope=runtime`，再使用 `java -cp 'target/classes:target/dependency/*' K8sAllQueriesExample`。Windows 的 classpath 分隔符改为 `;`，并使用双引号。
 
 ## 配置
 
@@ -85,3 +85,9 @@ Discovery 的 verbs 是 API 支持的动作，不是 RBAC 权限。示例跳过�
 Redis 使用 `<masterIP>ServiceToken`、`<masterIP>ApiServerUrl` 两个 String，以及配套的 `<masterIP>ServiceTokenMetadata`。再次运行主程序会复用缓存，`--refresh-cache` 先删除后重新获取，详见 [Redis 缓存指南](../redis-cache.md)。缓存不保证 token 永久有效；服务端 Secret 本身失效时需修复凭据，单纯删除 Redis 可能再次读到相同 token。
 
 本例使用 `fromSsh`，默认跳过 HTTPS 证书与主机名校验；SSH 主机密钥也沿用当前库的接受策略。需要严格 TLS 时，在客户端 Builder 的 `.fromSsh(ssh)` 前增加 `.insecureSkipTlsVerify(false).tlsAutoFallback(false)`，使用发现/缓存的 CA 或 JVM 信任库。完整配置见 [Redis 接入指南](../redis-cache.md)。
+
+该 main Demo 也由 [真实 Kubernetes E2E](../e2e.md) 工作流编译并运行；`queryTypedModels` 的对应接口另有实际资源与控制器状态断言。
+
+## 日志排查
+
+`1.5.2` 增加连接、缓存、凭据获取及 API 请求日志。本仓库运行时默认输出 INFO；在其他 Maven 项目中需有 SLF4J 2.x provider。只针对 `com.iskycc.k8s` 开启 DEBUG 可查看每次请求的路径、状态码、requestId、Audit-ID 和耗时，配置示例见[日志与排障](../logging.md)。

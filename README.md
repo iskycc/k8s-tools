@@ -13,6 +13,9 @@
    完整的 SSH → Redis → 各类查询演示见 [main 示例运行指南](docs/examples/all-queries.md)及 [K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)。
 3. [Redis 凭据缓存与自动接入](docs/redis-cache.md)：缓存 token/API 地址、删除刷新、免手工配置 API 与证书；缓存从 `1.3.0` 起提供，客户端托管入口从 `1.5.0` 起提供。
 4. [Java API 使用指南](docs/library-api.md)：连接、CRUD、Deployment/Service、分页、CRD、子资源和错误处理。
+5. [日志与排障](docs/logging.md)：启用日志、定位 SSH/Redis/API 失败、按 requestId 和 Audit-ID 排查请求。
+
+真实集群验证见 [GitHub Actions E2E](docs/e2e.md)：使用临时 kind Kubernetes、OpenSSH 和 Redis，在 Java 8、21 上验证接入、查询、CRUD、分页、CRD、RBAC 和 TLS。
 
 ## 项目结构与调用链
 
@@ -50,7 +53,7 @@ flowchart LR
 
 ## 开源组件与依赖范围
 
-下表对应当前源码的 [pom.xml](pom.xml)。`1.3.0` 新增 Jedis 缓存功能及 Redis 运行依赖；正式版 `1.2.1` 不包含这些新增内容。**`1.2.1` 将 SSHD 升级为 `2.19.0`；已有的 `1.2.0` 仍使用 `2.12.1`。** 源码开发构建版本为 `1.5.0-SNAPSHOT`，正式发布由工作流转换为 `1.5.0`。
+下表对应当前源码的 [pom.xml](pom.xml)。`1.3.0` 新增 Jedis 缓存功能及 Redis 运行依赖；正式版 `1.2.1` 不包含这些新增内容。**`1.2.1` 将 SSHD 升级为 `2.19.0`；已有的 `1.2.0` 仍使用 `2.12.1`。** 源码开发构建版本为 `1.5.2-SNAPSHOT`，正式发布由工作流转换为 `1.5.2`。
 
 运行和测试依赖按 **2026-09-20** 的 Maven Central 版本元数据及上游 Java 要求核对，除按接入要求固定的 Jedis `5.2.0` 外，选用支持 Java 8 的最新稳定版，不选择 alpha、beta、RC、milestone 或 SNAPSHOT。依据和版本选择见[依赖版本核对](docs/dependency-versions.md)。依赖固定为具体版本，后续升级需重新核对并运行 Java 8 测试。
 
@@ -64,10 +67,10 @@ flowchart LR
 | [Apache HttpClient](https://hc.apache.org/httpcomponents-client-5.6.x/)：`org.apache.httpcomponents.client5:httpclient5` | `5.6.4` | Kubernetes HTTP/TLS 请求及 PATCH | 直接 `compile` 依赖，传递给使用方 | Apache-2.0 |
 | [Apache HttpCore](https://hc.apache.org/httpcomponents-core-5.4.x/)：`org.apache.httpcomponents.core5:httpcore5`、`httpcore5-h2` | `5.4.3` | HttpClient 所需的 HTTP 协议与连接基础设施 | 由 httpclient5 传递 | Apache-2.0 |
 | [Gson](https://github.com/google/gson)：`com.google.code.gson:gson` | `2.14.0` | Kubernetes JSON 编解码和公共 JSON API | 直接 `compile` 依赖，传递给使用方 | Apache-2.0 |
-| [SLF4J](https://www.slf4j.org/license.html)：`org.slf4j:slf4j-api` | `2.0.19` | SSHD、HttpClient 的日志接口 | 直接 `compile` 依赖，统一上游日志 API 版本；不选择日志实现 | MIT |
-| SLF4J：`org.slf4j:slf4j-nop` | `2.0.19` | 本仓库 CLI 的静默日志实现 | `runtime` + `optional=true`，不会传递给使用方 | MIT |
+| [SLF4J](https://www.slf4j.org/license.html)：`org.slf4j:slf4j-api` | `2.0.19` | 本库、SSHD、HttpClient 的日志接口 | 直接 `compile` 依赖，统一上游日志 API 版本；不选择日志实现 | MIT |
+| SLF4J：`org.slf4j:slf4j-simple` | `2.0.19` | 本仓库 CLI 的控制台日志实现 | `runtime` + `optional=true`，不会传递给使用方 | MIT |
 
-`jcl-over-slf4j` 是 SSHD 上游 POM 引入的 Commons Logging 桥接。本库及当前 SSHD 实现不使用 Commons Logging，已通过 POM `exclusions` 排除它，避免向业务项目注入无关桥接。保留 SSHD、HttpClient 的必要依赖，不通过批量排除破坏运行能力。使用方已有日志实现时直接沿用，不需要添加本库的 NOP 实现。
+`jcl-over-slf4j` 是 SSHD 上游 POM 引入的 Commons Logging 桥接。本库及当前 SSHD 实现不使用 Commons Logging，已通过 POM `exclusions` 排除它，避免向业务项目注入无关桥接。保留 SSHD、HttpClient 的必要依赖，不通过批量排除破坏运行能力。使用方已有日志实现时直接沿用，无需重复添加 Simple 实现。
 
 Gson 引入的 `error_prone_annotations` 仅供静态分析使用，不是 JSON 运行时所需，已排除其传递；需要 Error Prone 的业务项目可按自己的编译工具配置引入。SLF4J 已升级到 `2.0.19`，使用方的日志 provider 需兼容 SLF4J 2.x；旧的 1.7 binding 不能直接作为 2.x provider 使用，参见 [SLF4J 版本兼容说明](https://www.slf4j.org/faq.html#compatibility)。
 
@@ -88,7 +91,7 @@ Maven 编译、测试、打包、源码/Javadoc、GPG 和 Central 发布插件�
 - `target/test-classes`、`target/surefire-reports` 和 CLI 使用的 `target/dependency` 都是本地构建目录，不是发布附件。`dependency:copy-dependencies -DincludeScope=runtime` 不复制测试依赖。
 - 发布的 POM 中保留 `test` 和 `optional` 声明，用于说明项目自身构建；这些声明不会变成使用方的传递依赖。可见声明不等于把测试代码打入 jar，规则见 [Maven 依赖范围说明](https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html#dependency-scope)。
 
-在使用方项目执行 `mvn dependency:tree -Dscope=runtime`，默认应只看到 k8s-tools 及上述必要组件，不应由本库引入 JUnit、Hamcrest、Bouncy Castle、SLF4J NOP、Error Prone 注解或 Commons Logging 桥接。使用方自行声明的依赖及版本管理会影响最终结果。
+在使用方项目执行 `mvn dependency:tree -Dscope=runtime`，默认应只看到 k8s-tools 及上述必要组件，不应由本库引入 JUnit、Hamcrest、Bouncy Castle、SLF4J Simple、Error Prone 注解或 Commons Logging 桥接。使用方自行声明的依赖及版本管理会影响最终结果。
 
 ## Maven Central 与持续集成
 
@@ -96,15 +99,15 @@ Maven 编译、测试、打包、源码/Javadoc、GPG 和 Central 发布插件�
 
 仅仓库维护者发布版本时需要验证 Central Portal 命名空间并配置发布 token 与 GPG 密钥。使用公开依赖无需这些凭据；接入步骤见 [Maven 配置指南](docs/maven-usage.md)，发布操作见 [Maven Central 发布指南](docs/publishing.md)。
 
-**`1.5.0` 将 Redis 配置、缓存判断和连接生命周期集成到客户端 `Builder.fromSsh`，提供完整查询 main 示例。** `1.3.0` 引入的 Redis 缓存、显式刷新和 SSH 自动发现继续支持；CLI 默认跳过 TLS 校验，可用 `--strict-tls` 开启严格校验。 保留已有仅密码 SSH 模式及通用资源 CRUD API。 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.5.0-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
+**`1.5.2` 新增 SSH、Redis、凭据获取及 API 请求诊断日志，并通过真实 Kubernetes E2E 验证；日志配置见[日志与排障](docs/logging.md)。** `1.5.0` 将 Redis 配置、缓存判断和连接生命周期集成到客户端 `Builder.fromSsh`，提供完整查询 main 示例。 `1.3.0` 引入的 Redis 缓存、显式刷新和 SSH 自动发现继续支持；CLI 默认跳过 TLS 校验，可用 `--strict-tls` 开启严格校验。 保留已有仅密码 SSH 模式及通用资源 CRUD API。 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.5.2-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
 
-其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.5.0/) 下载。旧版 `1.0.0` 只提供查询接口。
+其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.5.2/) 下载。旧版 `1.0.0` 只提供查询接口。
 
 ```xml
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.5.0</version>
+  <version>1.5.2</version>
 </dependency>
 ```
 
@@ -124,11 +127,11 @@ mvn test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 检查命令行入口，不连接集群
-java -cp 'target/k8s-tools-1.5.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
-产物为 `target/k8s-tools-1.5.0-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
+产物为 `target/k8s-tools-1.5.2-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
 
 ## 命令行使用
 
@@ -142,7 +145,7 @@ java -cp 'target/k8s-tools-1.5.0-SNAPSHOT.jar:target/dependency/*' \
 ### 运行示例
 
 ```bash
-java -cp 'target/k8s-tools-1.5.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --user root --key "$HOME/.ssh/id_rsa" \
   --namespace default
@@ -153,7 +156,7 @@ java -cp 'target/k8s-tools-1.5.0-SNAPSHOT.jar:target/dependency/*' \
 只使用密码登录机器、忽略本地 SSH 私钥及用户密钥签名认证：
 
 ```bash
-java -cp 'target/k8s-tools-1.5.0-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --port 22 --user root \
   --password '<SSH密码>' --password-only \
@@ -190,7 +193,7 @@ K8sApiClient client = K8sApiClient.builder()
         .fromSsh(sshConfig); // SshConfig；无需手工填写 API 地址、token 或证书。
 ```
 
-凭据失效后，增加 `.refreshCache(true)` 重新构造客户端即可删除旧缓存并获取新凭据。该 Builder 入口从正式版 `1.5.0` 起提供，也可从源码 `mvn clean install` 后引用本地 `1.5.0-SNAPSHOT`；已发布 `1.3.0` 的静态 `K8sApiClient.fromSsh(sshConfig, options)` 继续兼容。完整示例见 [Redis 接入指南](docs/redis-cache.md)与 [main 查询 Demo](docs/examples/all-queries.md)。
+凭据失效后，增加 `.refreshCache(true)` 重新构造客户端即可删除旧缓存并获取新凭据。该 Builder 入口从正式版 `1.5.0` 起提供，也可从源码 `mvn clean install` 后引用本地 `1.5.2-SNAPSHOT`；已发布 `1.3.0` 的静态 `K8sApiClient.fromSsh(sshConfig, options)` 继续兼容。完整示例见 [Redis 接入指南](docs/redis-cache.md)与 [main 查询 Demo](docs/examples/all-queries.md)。
 
 以下代码片段展示默认获取流程，前提同上：
 
@@ -368,6 +371,7 @@ mvn -Dtest=MainDemoTest test
 | `K8sResourceClientTest` | HTTP CRUD、完整 JSON、三种 Patch、Apply、分页、CRD Discovery、删除选项、子资源、冲突/权限/网络错误及写入不重放 |
 | `K8sToolsE2ETest` | 新建与复用 Secret、SA 重建及禁用重建、token 轮询、地址发现回退、资源查询、TLS 降级与严格模式、SSH 认证失败、HTTP 401/404 |
 | `MainDemoTest` | CLI 对模拟集群执行完整流程，校验输出且不泄露完整 token |
+| `RealKubernetesIT`（显式 profile） | [真实 kind E2E](docs/e2e.md)：SSH/Redis、CRUD、控制器、分页、CRD、TLS/RBAC；报告位于 `target/failsafe-reports/` |
 
 测试报告位于 `target/surefire-reports/`。模拟服务验证本地 SSH/HTTPS 链路及预设响应，不执行真正的 `kubectl`，也不验证真实 RBAC、准入校验或完整 token 生命周期。fixture 中的 `v1.28.2` 是固定返回值，不代表已通过该 Kubernetes 版本的集成验证。
 
