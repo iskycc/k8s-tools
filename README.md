@@ -18,6 +18,8 @@
 6. [跨 namespace 搜索](docs/resource-search.md)：Pod、ConfigMap、Service 等常见资源按名称关键词返回全部匹配项，支持简易和详细结果，从 `1.6.0` 起提供。
 7. [日志与排障](docs/logging.md)：启用日志、定位 SSH/Redis/API 失败、按 requestId 和 Audit-ID 排查请求。`1.5.5` 新增全局调试开关，默认关闭 DEBUG、保留必要日志；通过 `K8sLogging.setDebugEnabled(...)` 或 JVM 参数 `-Dk8s.tools.debug=...` 配置。
 
+当前源码新增 [K8sInstance 统一工具入口](docs/k8s-instance.md)：七个构造参数（master IP、SSH 端口、用户名、密码、Redis 密码、Redis IP、Redis 端口），通过 `K8sTools.init(instance)` 获取完整客户端。已发布的 `1.6.0` 不含该入口，使用前需从源码构建。
+
 真实集群验证见 [GitHub Actions E2E](docs/e2e.md)：使用临时 kind Kubernetes、OpenSSH 和 Redis，在 Java 8、21 上验证接入、查询、CRUD、分页、CRD、RBAC 和 TLS。
 
 ## 项目结构与调用链
@@ -37,6 +39,7 @@ flowchart LR
 | 位置 | 职责 |
 | --- | --- |
 | [Main.java](src/main/java/com/iskycc/k8s/Main.java) | 解析命令行参数，依次获取凭据、构建客户端、打印资源摘要 |
+| [K8sInstance.java](src/main/java/com/iskycc/k8s/K8sInstance.java) / [K8sTools.java](src/main/java/com/iskycc/k8s/K8sTools.java) | 七参数目标配置、统一初始化和显式刷新，返回完整 SDK 客户端；当前源码新增 |
 | [ssh/](src/main/java/com/iskycc/k8s/ssh/) | `SshConfig` 配置连接；`SshExecutor` 执行远程命令；`ServiceTokenFetcher` 编排凭据获取；`MasterInfo` 保存结果 |
 | [api/K8sApiClient.java](src/main/java/com/iskycc/k8s/api/K8sApiClient.java) | 公共入口、HTTP 请求、认证、TLS、Discovery 和兼容的 POJO 查询 |
 | [api/K8sResourceClient.java](src/main/java/com/iskycc/k8s/api/K8sResourceClient.java) | 完整 JSON 资源 CRUD、分页、Patch/Apply、删除参数和子资源 |
@@ -375,6 +378,7 @@ mvn -Dtest=MainDemoTest test
 | 测试类 | 覆盖内容 |
 | --- | --- |
 | `K8sApiClientTest` | 参数校验、URL 规范化、API 路径校验、MasterInfo 字段映射与 token 掩码 |
+| `K8sInstanceTest` | 七参数初始化、密码编码、IPv6 地址格式、缓存复用/刷新、多集群隔离、连接关闭及日志隐藏凭据 |
 | `ResourceSearchTest` | 跨 namespace 关键词匹配、14 类资源路由、简易/详细字段、分页完整性、选择器、错误传播及日志不泄露正文 |
 | `K8sResourceClientTest` | HTTP CRUD、完整 JSON、三种 Patch、Apply、分页、CRD Discovery、删除选项、子资源、冲突/权限/网络错误及写入不重放 |
 | `K8sToolsE2ETest` | 新建与复用 Secret、SA 重建及禁用重建、token 轮询、地址发现回退、资源查询、TLS 降级与严格模式、SSH 认证失败、HTTP 401/404 |

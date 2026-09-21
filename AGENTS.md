@@ -49,6 +49,7 @@ java -cp 'target/k8s-tools-1.6.0-SNAPSHOT.jar:target/dependency/*' \
 
 以下是当前实现的行为边界；涉及变更时同步调整调用方、文档和相关测试：
 
+- 当前源码新增根包 `K8sInstance` 与 `K8sTools`，已发布 1.6.0 不含。七参数构造顺序为 master SSH IP、端口、用户名、密码、Redis 原始密码、IP、端口；构造只校验，`K8sTools.init(instance[, options])` 返回完整 K8sApiClient。复用 Builder.fromSsh 的缓存/凭据/TLS/SSH Exec 行为，不保存全局客户端；refresh 返回新客户端、不重放业务请求。强制 passwordOnly，Redis 使用默认用户、TCP、DB 0；null/空 Redis 密码表示无认证，非空密码保留空白并按 UTF-8 编码一次；IPv6 正确加括号。连接生命周期仍由原客户端管理，不对外暴露 Jedis；对象 toString 隐藏密码，异常不回显非法 host。入口说明见 [K8sInstance](docs/k8s-instance.md)，测试 K8sInstanceTest 并回归 RedisCredentialsTest、ServiceTokenDiscoveryTest、MainDemoTest、LoggingTest。
 - 凭据获取会写入集群，默认使用 `kube-system/k8s-tools` SA、`k8s-tools-token` Secret 和指向 `cluster-admin` 的 `k8s-tools` ClusterRoleBinding。
 - 已有 SA 依次尝试自动 Secret 和手动 Secret；均无法读取 token 时默认删除并重建 SA。关闭 `recreateSaWhenTokenUnobtainable` 后直接抛异常。重试数表示首次读取之后的次数。
 - 已存在的 ClusterRoleBinding 不会校验或修正角色和主体；不要把“存在”描述成“权限已验证”。

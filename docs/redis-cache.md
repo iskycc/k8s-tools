@@ -24,6 +24,8 @@ key 直接使用 `SshConfig.host` 去除首尾空白后拼接后缀，不加冒�
 
 ## Java 接入：无需手工填写 API 地址或证书
 
+当前源码也支持用 [K8sInstance](k8s-instance.md) 分别传入 SSH 与 Redis 的 IP、端口、密码，再调用 `K8sTools.init(instance)`；内部编码 Redis 密码，使用默认用户和数据库 0。此入口尚未发布，`1.6.0` 不含；下面的 Builder 接口继续保留全部高级配置能力。
+
 需要一份直接运行的 `main` 程序时，使用 [K8sAllQueriesExample.java](examples/K8sAllQueriesExample.java)，按[运行指南](examples/all-queries.md)配置 SSH 和 Redis 后，即可演示本库各类查询入口、Discovery、CRD 和分页。
 
 ```java

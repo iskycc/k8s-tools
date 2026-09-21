@@ -9,6 +9,7 @@
 | 要完成的任务 | 对应章节 |
 | --- | --- |
 | 配置地址、token、CA 或 SSH 初始化 | [连接与公共入口](#连接与公共入口) |
+| 七个参数指定目标集群并统一初始化 | [K8sInstance / K8sTools](k8s-instance.md)（当前源码新增，1.6.0 不含） |
 | 跨全部 namespace 按关键词搜索资源 | [搜索 SDK](resource-search.md)：简易/详细 List，支持 Pod、ConfigMap、Service 等（1.6.0 起） |
 | 查版本、节点、Pod 等现有资源 | [查询与资源入口选择](#查询与资源入口选择) |
 | 创建、更新、删除资源 | [CRUD 示例](#创建读取修改删除示例)、[Deployment 与 Service](#deployment-与-service-示例) |
