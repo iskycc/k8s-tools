@@ -11,6 +11,9 @@ import com.iskycc.k8s.api.K8sResourceClient;
 import com.iskycc.k8s.api.K8sResources;
 import com.iskycc.k8s.api.ListOptions;
 import com.iskycc.k8s.api.PatchType;
+import com.iskycc.k8s.api.PodExecException;
+import com.iskycc.k8s.api.PodExecOptions;
+import com.iskycc.k8s.api.PodExecResult;
 import com.iskycc.k8s.api.ResourceDefinition;
 import com.iskycc.k8s.api.WriteOptions;
 import com.iskycc.k8s.api.model.K8sList;
@@ -76,6 +79,73 @@ public class RealKubernetesIT {
             client.namespaces().deleteIfExists(namespace, DeleteOptions.builder()
                     .propagationPolicy(DeleteOptions.PropagationPolicy.Background).build());
         }
+    }
+
+    @Test
+    public void podExecRunsDirectlyViaApiWithExitCodesContainersAndRbac() {
+        client.pods(namespace).create(json("{\"metadata\":{\"name\":\"exec-target\"},\"spec\":{"
+                + "\"terminationGracePeriodSeconds\":0,\"containers\":["
+                + "{\"name\":\"main\",\"image\":\"busybox:1.37.0\",\"imagePullPolicy\":\"IfNotPresent\","
+                + "\"command\":[\"sh\",\"-c\",\"sleep 300\"],\"env\":[{\"name\":\"CONTAINER_NAME\",\"value\":\"main\"}]},"
+                + "{\"name\":\"sidecar\",\"image\":\"busybox:1.37.0\",\"imagePullPolicy\":\"IfNotPresent\","
+                + "\"command\":[\"sh\",\"-c\",\"sleep 300\"],\"env\":[{\"name\":\"CONTAINER_NAME\",\"value\":\"sidecar\"}]}]}}"));
+        await("Exec Pod 的两个容器应 Ready", () -> {
+            JsonObject status = client.pods(namespace).get("exec-target").getAsJsonObject("status");
+            if (status == null || !status.has("containerStatuses") || status.getAsJsonArray("containerStatuses").size() != 2) { return false; }
+            for (JsonElement item : status.getAsJsonArray("containerStatuses")) {
+                if (!item.getAsJsonObject().get("ready").getAsBoolean()) { return false; }
+            }
+            return true;
+        });
+        // 仅交给客户端 URL/token/CA，Exec 不持有 SSH 配置、Redis URL 或 kubectl。
+        K8sApiClient direct;
+        try (JedisPool pool = new JedisPool(URI.create(redisUrl)); Jedis redis = pool.getResource()) {
+            JsonObject metadata = json(redis.get("127.0.0.1ServiceTokenMetadata"));
+            direct = K8sApiClient.builder().apiServer(client.getApiServer()).token(redis.get(TOKEN_KEY))
+                    .caCertPem(metadata.get("caCertPem").getAsString()).tlsAutoFallback(false).build();
+        }
+        PodExecOptions main = PodExecOptions.builder().container("main").build();
+        PodExecResult literal = direct.exec(namespace, "exec-target", main, "printf", "%s", "a b;$(echo unsafe)&中文");
+        assertEquals(0, literal.getExitCode());
+        assertEquals("a b;$(echo unsafe)&中文", literal.getStdout());
+        PodExecResult failure = direct.execShell(namespace, "exec-target", main, "printf stdout; printf stderr >&2; exit 7");
+        assertEquals(7, failure.getExitCode()); assertEquals("stdout", failure.getStdout()); assertEquals("stderr", failure.getStderr());
+        assertEquals("sidecar\n", direct.exec(namespace, "exec-target",
+                PodExecOptions.builder().container("sidecar").build(), "printenv", "CONTAINER_NAME").getStdout());
+        assertEquals("1\n", direct.execShell(namespace, "exec-target", main, "echo once >> /tmp/exec-count; wc -l < /tmp/exec-count").getStdout());
+        assertEquals("1\n", direct.execShell(namespace, "exec-target", main, "wc -l < /tmp/exec-count").getStdout());
+        assertEquals(PodExecException.Reason.OUTPUT_LIMIT, assertThrows(PodExecException.class,
+                () -> direct.execShell(namespace, "exec-target", PodExecOptions.builder().container("main").maxOutputBytes(4).build(),
+                        "printf 12345678")).getFailureReason());
+        assertEquals(PodExecException.Reason.TIMEOUT, assertThrows(PodExecException.class,
+                () -> direct.exec(namespace, "exec-target", PodExecOptions.builder().container("main").timeoutMs(1000).build(),
+                        "sleep", "10")).getFailureReason());
+        assertEquals(404, assertThrows(K8sApiException.class,
+                () -> direct.exec(namespace, "missing-pod", "date")).getStatusCode());
+        K8sResourceClient accounts = client.resource(K8sResources.SERVICE_ACCOUNTS).inNamespace(namespace);
+        accounts.create(json("{\"metadata\":{\"name\":\"exec-denied\"}}"));
+        JsonObject token = accounts.subresource("exec-denied", "token").create(json(
+                "{\"apiVersion\":\"authentication.k8s.io/v1\",\"kind\":\"TokenRequest\",\"spec\":{\"audiences\":[],\"expirationSeconds\":600}}"), null);
+        K8sApiClient denied = K8sApiClient.builder().apiServer(client.getApiServer())
+                .token(token.getAsJsonObject("status").get("token").getAsString()).insecureSkipTlsVerify(true).build();
+        assertEquals(403, assertThrows(K8sApiException.class,
+                () -> denied.exec(namespace, "exec-target", main, "date")).getStatusCode());
+
+        // fromSsh 必须保留配置；显式 SSH 在新集群上验证真实 kubectl 执行路径。
+        PodExecOptions sshExec = PodExecOptions.builder().container("main")
+                .transport(PodExecOptions.Transport.SSH).build();
+        assertEquals("a b;$(echo unsafe)&中文", client.exec(namespace, "exec-target", sshExec,
+                "printf", "%s", "a b;$(echo unsafe)&中文").getStdout());
+        PodExecResult sshFailure = client.execShell(namespace, "exec-target", sshExec,
+                "printf stdout; printf stderr >&2; exit 7");
+        assertEquals(7, sshFailure.getExitCode()); assertEquals("stdout", sshFailure.getStdout());
+        assertTrue(sshFailure.getStderr().startsWith("stderr")); // kubectl 也向 stderr 写退出提示。
+        K8sApiClient sshDenied = K8sApiClient.builder().apiServer(client.getApiServer())
+                .token(token.getAsJsonObject("status").get("token").getAsString())
+                .insecureSkipTlsVerify(true).execSshConfig(ssh(false)).build();
+        PodExecResult forbidden = sshDenied.exec(namespace, "exec-target", sshExec, "date");
+        assertFalse("SSH 路径必须使用原 SA 的权限，不能借用远端 admin kubeconfig", forbidden.isSuccess());
+        assertTrue(forbidden.getStderr().contains("Forbidden"));
     }
 
     @Test

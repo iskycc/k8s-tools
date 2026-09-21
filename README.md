@@ -13,7 +13,8 @@
    完整的 SSH → Redis → 各类查询演示见 [main 示例运行指南](docs/examples/all-queries.md)及 [K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)。
 3. [Redis 凭据缓存与自动接入](docs/redis-cache.md)：缓存 token/API 地址、删除刷新、免手工配置 API 与证书；缓存从 `1.3.0` 起提供，客户端托管入口从 `1.5.0` 起提供。
 4. [Java API 使用指南](docs/library-api.md)：连接、CRUD、Deployment/Service、分页、CRD、子资源和错误处理。
-5. [日志与排障](docs/logging.md)：启用日志、定位 SSH/Redis/API 失败、按 requestId 和 Audit-ID 排查请求。
+5. [Pod 容器命令执行](docs/pod-exec.md)：`client.exec(namespace, podName, command...)` 返回 stdout/stderr/退出码，支持指定容器和超时；有 SSH 配置时，低于 Kubernetes 1.31 自动选择 SSH/kubectl，其余使用 API WebSocket。从 `1.5.5` 起提供。
+6. [日志与排障](docs/logging.md)：启用日志、定位 SSH/Redis/API 失败、按 requestId 和 Audit-ID 排查请求。`1.5.5` 新增全局调试开关，默认关闭 DEBUG、保留必要日志；通过 `K8sLogging.setDebugEnabled(...)` 或 JVM 参数 `-Dk8s.tools.debug=...` 配置。
 
 真实集群验证见 [GitHub Actions E2E](docs/e2e.md)：使用临时 kind Kubernetes、OpenSSH 和 Redis，在 Java 8、21 上验证接入、查询、CRUD、分页、CRD、RBAC 和 TLS。
 
@@ -49,13 +50,13 @@ flowchart LR
 
 本项目没有依赖官方 `io.kubernetes:client-java` 或 `client-java-api`。当前 `K8sApiClient` 使用 Apache HttpClient 发出 Bearer Token REST 请求，Gson 负责 JSON，Discovery 提供资源路径与操作能力；SSH 凭据初始化由 Apache MINA SSHD 完成。
 
-因此，本库的公共接口、资源模型和错误处理由本项目维护。官方 SDK 的客户端配置、生成模型、watch、exec 等功能不会因依赖本库而自动提供。官方客户端从 `20.0.0` 起在主版本中移除了 Java 8 支持，另提供 `-legacy` 版本；详见 [Kubernetes Java Client 官方说明](https://github.com/kubernetes-client/java#release)。本库继续使用现有 REST 实现，保持 Java 8 兼容。
+因此，本库的公共接口、资源模型和错误处理由本项目维护。官方 SDK 的客户端配置、生成模型、watch 等功能不会因依赖本库而自动提供；当前源码的非交互式 exec 使用独立 WebSocket，并支持旧集群的 SSH/kubectl 通道。官方客户端从 `20.0.0` 起在主版本中移除了 Java 8 支持，另提供 `-legacy` 版本；详见 [Kubernetes Java Client 官方说明](https://github.com/kubernetes-client/java#release)。本库继续使用现有 REST 实现，保持 Java 8 兼容。
 
 ## 开源组件与依赖范围
 
-下表对应当前源码的 [pom.xml](pom.xml)。`1.3.0` 新增 Jedis 缓存功能及 Redis 运行依赖；正式版 `1.2.1` 不包含这些新增内容。**`1.2.1` 将 SSHD 升级为 `2.19.0`；已有的 `1.2.0` 仍使用 `2.12.1`。** 源码开发构建版本为 `1.5.2-SNAPSHOT`，正式发布由工作流转换为 `1.5.2`。
+下表对应当前源码的 [pom.xml](pom.xml)。`1.3.0` 新增 Jedis 缓存功能及 Redis 运行依赖；正式版 `1.2.1` 不包含这些新增内容。**`1.2.1` 将 SSHD 升级为 `2.19.0`；已有的 `1.2.0` 仍使用 `2.12.1`。** 源码开发构建版本为 `1.5.5-SNAPSHOT`，正式版 `1.5.5` 包含 Pod Exec。
 
-运行和测试依赖按 **2026-09-20** 的 Maven Central 版本元数据及上游 Java 要求核对，除按接入要求固定的 Jedis `5.2.0` 外，选用支持 Java 8 的最新稳定版，不选择 alpha、beta、RC、milestone 或 SNAPSHOT。依据和版本选择见[依赖版本核对](docs/dependency-versions.md)。依赖固定为具体版本，后续升级需重新核对并运行 Java 8 测试。
+运行和测试依赖按 **2026-09-20** 的 Maven Central 版本元数据及上游 Java 要求核对，除按接入要求固定的 Jedis `5.2.0` 外，选用支持 Java 8 的最新稳定版，不选择 alpha、beta、RC、milestone 或 SNAPSHOT。依据和版本选择见[依赖版本核对](docs/dependency-versions.md)。Pod Exec 的新增依赖另于 2026-09-21 核对。依赖固定为具体版本，后续升级需重新核对并运行 Java 8 测试。
 
 | 开源组件 / Maven 坐标 | 版本 | 用途 | 范围与传递行为 | 许可证 |
 | --- | --- | --- | --- | --- |
@@ -66,6 +67,7 @@ flowchart LR
 | Apache MINA SSHD：`org.apache.sshd:sshd-common` | `2.19.0` | SSH 协议、密钥解析等公共能力 | 由 sshd-core 传递 | Apache-2.0 |
 | [Apache HttpClient](https://hc.apache.org/httpcomponents-client-5.6.x/)：`org.apache.httpcomponents.client5:httpclient5` | `5.6.4` | Kubernetes HTTP/TLS 请求及 PATCH | 直接 `compile` 依赖，传递给使用方 | Apache-2.0 |
 | [Apache HttpCore](https://hc.apache.org/httpcomponents-core-5.4.x/)：`org.apache.httpcomponents.core5:httpcore5`、`httpcore5-h2` | `5.4.3` | HttpClient 所需的 HTTP 协议与连接基础设施 | 由 httpclient5 传递 | Apache-2.0 |
+| [nv-websocket-client](https://github.com/TakahikoKawasaki/nv-websocket-client)：`com.neovisionaries:nv-websocket-client` | `2.14` | Pod Exec WebSocket 通道 | 直接 `compile` 依赖，无运行时传递依赖 | Apache-2.0 |
 | [Gson](https://github.com/google/gson)：`com.google.code.gson:gson` | `2.14.0` | Kubernetes JSON 编解码和公共 JSON API | 直接 `compile` 依赖，传递给使用方 | Apache-2.0 |
 | [SLF4J](https://www.slf4j.org/license.html)：`org.slf4j:slf4j-api` | `2.0.19` | 本库、SSHD、HttpClient 的日志接口 | 直接 `compile` 依赖，统一上游日志 API 版本；不选择日志实现 | MIT |
 | SLF4J：`org.slf4j:slf4j-simple` | `2.0.19` | 本仓库 CLI 的控制台日志实现 | `runtime` + `optional=true`，不会传递给使用方 | MIT |
@@ -81,6 +83,9 @@ Gson 引入的 `error_prone_annotations` 仅供静态分析使用，不是 JSON 
 | [JUnit 4](https://junit.org/junit4/)：`junit:junit` | `4.13.2` | 单元测试、SSH/HTTPS 模拟端到端测试 | EPL-1.0 |
 | [Hamcrest](https://hamcrest.org/JavaHamcrest/)：`org.hamcrest:hamcrest` | `3.0` | JUnit 匹配器；排除旧 hamcrest-core 1.3 后直接声明为 test | BSD-3-Clause |
 | [Bouncy Castle](https://www.bouncycastle.org/licence.html)：`org.bouncycastle:bcpkix-jdk18on`、`bcprov-jdk18on`、`bcutil-jdk18on` | `1.86` | 生成模拟 API Server 的证书与 CA；后两项由 bcpkix 传递 | Bouncy Castle Licence（MIT） |
+| [OkHttp / MockWebServer](https://github.com/square/okhttp)：`com.squareup.okhttp3:mockwebserver3`、`okhttp-jvm` | `5.5.0` | 模拟 WebSocket/HTTPS 服务 | Apache-2.0 |
+| [Okio](https://github.com/square/okio)：`com.squareup.okio:okio-jvm` | `3.18.2` | MockWebServer 的 I/O 支持 | Apache-2.0 |
+| [Kotlin](https://github.com/JetBrains/kotlin)：`org.jetbrains.kotlin:kotlin-stdlib` | `2.4.20` | MockWebServer 的运行支持 | Apache-2.0 |
 
 Maven 编译、测试、打包、源码/Javadoc、GPG 和 Central 发布插件属于构建工具，版本与启用条件见 POM 的 `build` / `profiles`，不属于业务依赖，不会随本库进入使用方 classpath。许可证以各组件发行包中的声明为准。
 
@@ -99,15 +104,15 @@ Maven 编译、测试、打包、源码/Javadoc、GPG 和 Central 发布插件�
 
 仅仓库维护者发布版本时需要验证 Central Portal 命名空间并配置发布 token 与 GPG 密钥。使用公开依赖无需这些凭据；接入步骤见 [Maven 配置指南](docs/maven-usage.md)，发布操作见 [Maven Central 发布指南](docs/publishing.md)。
 
-**`1.5.2` 新增 SSH、Redis、凭据获取及 API 请求诊断日志，并通过真实 Kubernetes E2E 验证；日志配置见[日志与排障](docs/logging.md)。** `1.5.0` 将 Redis 配置、缓存判断和连接生命周期集成到客户端 `Builder.fromSsh`，提供完整查询 main 示例。 `1.3.0` 引入的 Redis 缓存、显式刷新和 SSH 自动发现继续支持；CLI 默认跳过 TLS 校验，可用 `--strict-tls` 开启严格校验。 保留已有仅密码 SSH 模式及通用资源 CRUD API。 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.5.2-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
+**`1.5.5` 新增非交互式 Pod Exec、低于 Kubernetes 1.31 的 SSH 回退、通道 INFO 日志及全局调试开关。** `1.5.2` 新增 SSH、Redis、凭据获取及 API 请求诊断日志，并通过真实 Kubernetes E2E 验证；日志配置见[日志与排障](docs/logging.md)。 `1.5.0` 将 Redis 配置、缓存判断和连接生命周期集成到客户端 `Builder.fromSsh`，提供完整查询 main 示例。 `1.3.0` 引入的 Redis 缓存、显式刷新和 SSH 自动发现继续支持；CLI 默认跳过 TLS 校验，可用 `--strict-tls` 开启严格校验。 保留已有仅密码 SSH 模式及通用资源 CRUD API。 完整公共方法和示例见 [Java API 指南](docs/library-api.md)，核对结果见 [工具库完整性核对](docs/api-completeness.md)。当前源码的开发构建版本为 `1.5.5-SNAPSHOT`；本次发布正式版，不同步发布快照，快照规则见[发布指南](docs/publishing.md#发布与使用快照)。
 
-其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.5.2/) 下载。旧版 `1.0.0` 只提供查询接口。
+其他 Maven 项目使用以下正式版坐标，无需添加额外仓库；发布完成后可从 [Maven Central](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.5.5/) 下载。旧版 `1.0.0` 只提供查询接口。
 
 ```xml
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.5.2</version>
+  <version>1.5.5</version>
 </dependency>
 ```
 
@@ -127,11 +132,11 @@ mvn test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 检查命令行入口，不连接集群
-java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.5-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
-产物为 `target/k8s-tools-1.5.2-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
+产物为 `target/k8s-tools-1.5.5-SNAPSHOT.jar`，运行时依赖位于 `target/dependency/`。应用 jar 不包含依赖，使用上面的 `-cp` 方式启动；仅执行 `java -jar` 无法完成业务流程。Windows 下将 classpath 分隔符 `:` 改为 `;`，并使用双引号包裹 classpath。
 
 ## 命令行使用
 
@@ -145,7 +150,7 @@ java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
 ### 运行示例
 
 ```bash
-java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.5-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --user root --key "$HOME/.ssh/id_rsa" \
   --namespace default
@@ -156,7 +161,7 @@ java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
 只使用密码登录机器、忽略本地 SSH 私钥及用户密钥签名认证：
 
 ```bash
-java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.5-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main \
   --host 192.0.2.10 --port 22 --user root \
   --password '<SSH密码>' --password-only \
@@ -193,7 +198,7 @@ K8sApiClient client = K8sApiClient.builder()
         .fromSsh(sshConfig); // SshConfig；无需手工填写 API 地址、token 或证书。
 ```
 
-凭据失效后，增加 `.refreshCache(true)` 重新构造客户端即可删除旧缓存并获取新凭据。该 Builder 入口从正式版 `1.5.0` 起提供，也可从源码 `mvn clean install` 后引用本地 `1.5.2-SNAPSHOT`；已发布 `1.3.0` 的静态 `K8sApiClient.fromSsh(sshConfig, options)` 继续兼容。完整示例见 [Redis 接入指南](docs/redis-cache.md)与 [main 查询 Demo](docs/examples/all-queries.md)。
+凭据失效后，增加 `.refreshCache(true)` 重新构造客户端即可删除旧缓存并获取新凭据。该 Builder 入口从正式版 `1.5.0` 起提供，也可从源码 `mvn clean install` 后引用本地 `1.5.5-SNAPSHOT`；已发布 `1.3.0` 的静态 `K8sApiClient.fromSsh(sshConfig, options)` 继续兼容。完整示例见 [Redis 接入指南](docs/redis-cache.md)与 [main 查询 Demo](docs/examples/all-queries.md)。
 
 以下代码片段展示默认获取流程，前提同上：
 
@@ -235,7 +240,7 @@ deployments.replace("web", current); // 保留 GET 得到的 metadata.resourceVe
 deployments.scale("web", 3);
 ```
 
-创建、删除、Patch、Apply、CRD、分页和参数说明见 [Java API 指南](docs/library-api.md)。`getRaw(path)` 获取原始文本，`request(...)` 返回 HTTP 状态、正文及响应头。当前不支持 watch 或其他流式/协议升级操作。
+创建、删除、Patch、Apply、CRD、分页和参数说明见 [Java API 指南](docs/library-api.md)。`getRaw(path)` 获取原始文本，`request(...)` 返回 HTTP 状态、正文及响应头。当前源码另提供独立的 [Pod Exec](docs/pod-exec.md) 入口（WebSocket / 旧集群 SSH）；watch、交互式终端和其他流式能力尚未提供。
 
 如果已有 API 地址和 token，可直接使用 `K8sApiClient.builder().apiServer(...).token(...).build()`，无需经过 SSH。TLS 默认值见下文。
 

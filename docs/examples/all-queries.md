@@ -1,6 +1,6 @@
 # 从 SSH、Redis 到全部查询接口的 main 示例
 
-入口文件：[K8sAllQueriesExample.java](K8sAllQueriesExample.java)。兼容 Java 8，依赖 `io.github.iskycc:k8s-tools:1.5.2`，使用从 `1.5.0` 起提供的客户端托管 Redis 接口；`1.3.0` 不包含此入口。也可直接在本仓库编译运行。
+入口文件：[K8sAllQueriesExample.java](K8sAllQueriesExample.java)。兼容 Java 8，依赖 `io.github.iskycc:k8s-tools:1.5.5`，使用从 `1.5.0` 起提供的客户端托管 Redis 接口；`1.3.0` 不包含此入口。也可直接在本仓库编译运行。
 
 示例执行顺序：配置 SSH → 将 Redis URL 传给客户端 Builder → `fromSsh` 内部读取缓存或通过 SSH 获取凭据并发现 API 地址 → 执行查询。密码模式优先；设置了非空 SSH 密码后不会使用本地私钥。API 地址、token 和证书均无需手工输入。
 
@@ -35,7 +35,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExamp
 java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExample --refresh-cache
 ```
 
-在其他 Maven 项目运行时，使用 [Maven 配置指南](../maven-usage.md#从空项目运行一个查询示例)中的 POM，依赖版本使用 `1.5.2`；将示例复制到 `src/main/java/K8sAllQueriesExample.java`，运行 `mvn compile dependency:copy-dependencies -DincludeScope=runtime`，再使用 `java -cp 'target/classes:target/dependency/*' K8sAllQueriesExample`。Windows 的 classpath 分隔符改为 `;`，并使用双引号。
+在其他 Maven 项目运行时，使用 [Maven 配置指南](../maven-usage.md#从空项目运行一个查询示例)中的 POM，依赖版本使用 `1.5.5`；将示例复制到 `src/main/java/K8sAllQueriesExample.java`，运行 `mvn compile dependency:copy-dependencies -DincludeScope=runtime`，再使用 `java -cp 'target/classes:target/dependency/*' K8sAllQueriesExample`。Windows 的 classpath 分隔符改为 `;`，并使用双引号。
 
 ## 配置
 
@@ -76,7 +76,7 @@ java -cp 'target/examples:target/classes:target/dependency/*' K8sAllQueriesExamp
 
 常用资源与 Discovery 遍历默认只读首页，并输出 `hasMore`；**只有 Pod 的两段分页演示会遍历所有页**，其中 `listAll` 把全部结果放入内存。旧 POJO 快捷方法也不自动翻页。所有列表只展示最多十条摘要，Secret/ConfigMap/CRD 只输出 Kind、namespace、name，不输出数据、注解或完整正文。子资源查询在没有对应 Pod/Deployment 时跳过。
 
-Discovery 的 verbs 是 API 支持的动作，不是 RBAC 权限。示例跳过不支持 list 的资源及子资源集合，遇到 403/404 记录并继续；其他查询错误计入失败，最后退出码为 1。401 立即中止并提示刷新缓存，不自动刷新或重放请求。分页 410、重复 token 或混合版本也会报失败，不从第一页静默重来。`watch`、`exec`、`attach`、`port-forward` 尚非本库支持的查询能力。
+Discovery 的 verbs 是 API 支持的动作，不是 RBAC 权限。示例跳过不支持 list 的资源及子资源集合，遇到 403/404 记录并继续；其他查询错误计入失败，最后退出码为 1。401 立即中止并提示刷新缓存，不自动刷新或重放请求。分页 410、重复 token 或混合版本也会报失败，不从第一页静默重来。该查询示例不执行容器命令；当前源码的非交互式 exec 见 [Pod Exec 指南](../pod-exec.md)。`watch`、`attach`、`port-forward` 尚未提供。
 
 ## SSH 初始化、缓存和 TLS 行为
 
@@ -90,4 +90,4 @@ Redis 使用 `<masterIP>ServiceToken`、`<masterIP>ApiServerUrl` 两个 String�
 
 ## 日志排查
 
-`1.5.2` 增加连接、缓存、凭据获取及 API 请求日志。本仓库运行时默认输出 INFO；在其他 Maven 项目中需有 SLF4J 2.x provider。只针对 `com.iskycc.k8s` 开启 DEBUG 可查看每次请求的路径、状态码、requestId、Audit-ID 和耗时，配置示例见[日志与排障](../logging.md)。
+`1.5.2` 增加连接、缓存、凭据获取及 API 请求日志。本仓库运行时默认输出 INFO；在其他 Maven 项目中需有 SLF4J 2.x provider。`1.5.5` 新增默认关闭的全局调试开关：排查时添加 `-Dk8s.tools.debug=true`，并只针对 `com.iskycc.k8s` 开启 DEBUG，可查看每次请求的路径、状态码、requestId、Audit-ID 和耗时；生产环境保持 `false`。配置示例见[日志与排障](../logging.md)。

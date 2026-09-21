@@ -1,6 +1,6 @@
 # Java 8 依赖版本核对
 
-本页对应 `1.5.2`：原有依赖于 2026-09-20 核对；2026-09-21 将 optional 日志实现从 NOP 改为 Simple，并核对 [Simple 元数据](https://repo.maven.apache.org/maven2/org/slf4j/slf4j-simple/maven-metadata.xml)，最新稳定版仍为 `2.0.19`，与 API 版本一致。已有正式版的 POM 不会被覆盖。
+本页记录 `1.5.5` 的依赖，包含沿用 `1.5.2` 的组件及新增 Pod Exec 依赖：原有依赖于 2026-09-20 核对；2026-09-21 将 optional 日志实现从 NOP 改为 Simple，并核对 [Simple 元数据](https://repo.maven.apache.org/maven2/org/slf4j/slf4j-simple/maven-metadata.xml)，最新稳定版仍为 `2.0.19`，与 API 版本一致。已有正式版的 POM 不会被覆盖。
 
 版本策略是选择**支持 Java 8 的最新稳定版本**；Jedis 按接入要求固定为 `5.2.0`，不随此策略升级。先读取 Maven Central 的完整版本列表，排除预发布版本，再核对上游最低运行 JDK、实际 jar 基础字节码和本项目在 JDK 8 下的测试。不能直接采用元数据的 `latest` / `release` 字段，因为这些字段可能指向 alpha 或 milestone。
 
@@ -19,6 +19,10 @@
 | JUnit 4 | `4.13.2` | 当前测试使用 JUnit 4 API；`junit:junit` 的[最新版本](https://repo.maven.apache.org/maven2/junit/junit/maven-metadata.xml)仍为 4.13.2。JUnit Jupiter 是不同坐标与 API，本次不迁移测试框架 |
 | Hamcrest | `3.0` | [最新稳定版](https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest/maven-metadata.xml)，[上游说明](https://hamcrest.org/JavaHamcrest/distributables)要求 Java 8；使用 `org.hamcrest:hamcrest` 替换 JUnit 传递的旧 hamcrest-core 1.3 |
 | Bouncy Castle PKIX / Provider / Util | `1.86` | 使用面向 Java 8+ 的 `*-jdk18on` 坐标；[Central 版本列表](https://repo.maven.apache.org/maven2/org/bouncycastle/bcpkix-jdk18on/maven-metadata.xml)及[官方下载](https://www.bouncycastle.org/download/bouncy-castle-java/)可核对，三个组件版本一致，仅用于测试 |
+| nv-websocket-client | `2.14` | 2026-09-21 核对 [Central 完整版本列表](https://repo.maven.apache.org/maven2/com/neovisionaries/nv-websocket-client/maven-metadata.xml)，仍是最新稳定版；[上游 POM](https://github.com/TakahikoKawasaki/nv-websocket-client/blob/nv-websocket-client-2.14/pom.xml)目标 Java 5，无运行传递依赖。用于一次 WebSocket 握手，不自动重定向或重试 |
+| MockWebServer / OkHttp JVM | `5.5.0` | 仅 test；[Central 列表](https://repo.maven.apache.org/maven2/com/squareup/okhttp3/mockwebserver3/maven-metadata.xml)最新稳定版；[上游 README](https://github.com/square/okhttp/blob/parent-5.5.0/README.md)要求 Java 8+，Maven 选实际 JVM artifact |
+| Okio JVM | `3.18.2` | 仅 test；[Central 列表](https://repo.maven.apache.org/maven2/com/squareup/okio/okio-jvm/maven-metadata.xml)最新稳定版；基础字节码为 Java 8 |
+| Kotlin stdlib | `2.4.20` | 仅 test；[Central 列表](https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/maven-metadata.xml)最新稳定版；基础字节码为 Java 8。静态分析 `org.jetbrains:annotations` 排除 |
 
 上表涵盖本库实际解析到的编译、运行和测试依赖。Maven 插件与发布工具在独立的构建 classloader 中运行，不向下游传递；其版本和执行条件继续由 POM 的 `build` / `profiles` 管理。
 
@@ -29,6 +33,6 @@
 - Gson 的 `error_prone_annotations` 是静态分析注解，其 [JPMS 声明](https://github.com/google/gson/blob/gson-parent-2.14.0/gson/src/main/java/module-info.java)为 `requires static`；JSON 运行不需要它，继续保持使用方 classpath 精简。
 - 直接声明 `slf4j-api:2.0.19`，避免上游依赖声明使解析结果退回 1.7.x；Simple 使用相同版本且保持 optional。使用方可通过自身 dependencyManagement 选择版本，但需自行负责兼容性。
 - SLF4J 2.x 的日志 provider 采用 ServiceLoader；升级时需同步使用方日志实现，不能把旧 1.7 binding 当作 2.x provider。详情见 [SLF4J FAQ](https://www.slf4j.org/faq.html#compatibility)。
-- JUnit、Hamcrest 和 Bouncy Castle 都保持 test scope；主 jar、sources 和 Javadoc 不包含测试代码。
+- JUnit、Hamcrest、Bouncy Castle、MockWebServer、OkHttp、Okio 和 Kotlin 都保持 test scope；主 jar、sources 和 Javadoc 不包含测试代码。
 
 验证时同时运行 Java 8、21 的完整测试，检查实际依赖树，以及不含测试库、日志实现和静态分析注解的独立消费项目。对于 multi-release jar，Java 8 不加载 `META-INF/versions/*` 或 `module-info.class`，字节码检查应区分这些条目与基础类。

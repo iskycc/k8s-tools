@@ -15,7 +15,7 @@ kind 是在容器中运行的 Kubernetes，提供真实 API；mock API Server �
 
 - runner：`ubuntu-24.04`；Java 8、21 两个独立作业，每个作业创建自己的集群。
 - kind `v0.33.0`、Kubernetes `v1.37.0`，二进制 SHA256 和节点镜像 digest 固定，来源见 [kind 发布说明](https://github.com/kubernetes-sigs/kind/releases/tag/v0.33.0)。kubectl 从该节点镜像复制，版本与 API Server 一致。
-- OpenSSH 和 Redis 使用 runner 的 Ubuntu 软件包，Redis 实际版本输出到准备步骤日志；测试工作负载使用 `registry.k8s.io/pause:3.10`。
+- OpenSSH 和 Redis 使用 runner 的 Ubuntu 软件包，Redis 实际版本输出到准备步骤日志；测试工作负载使用 `registry.k8s.io/pause:3.10`，Exec 测试使用含 shell 的 `busybox:1.37.0`。
 - 推送 `main`、PR 或手动 `workflow_dispatch` 均可触发。可在 Actions → **Real Kubernetes E2E** → **Run workflow** 手动执行。
 - 只使用 `contents: read` 权限，不发布 Maven 版本，不访问生产集群。
 
@@ -39,9 +39,10 @@ SSH 服务监听 `127.0.0.1:22222`，使用临时用户 `k8se2e`；Redis 监听 
 | Discovery / CRD | 从 Discovery 定位新建 CRD；schema 校验、未知字段保留、资源 CRUD、status 子资源 |
 | 错误与权限 | 401、403、404、409、严格字段校验 400、CRD schema 校验 422；受限 SA 的 TokenRequest 和 SelfSubjectAccessReview |
 | TLS | 默认忽略自签名证书；发现的 CA 可用于严格校验；JVM 不信任且关闭降级时请求失败 |
+| Pod Exec | 双容器 BusyBox、严格 TLS、argv 参数保留、shell、stdout/stderr、非零退出码、输出上限、超时、404/403 和无重复写入；WebSocket 直连 API Server，另强制 SSH 验证参数、退出码及受限 token 不会借用 master 管理员身份 |
 | 使用方入口 | 实际编译并运行 [完整查询 main Demo](examples/all-queries.md) 和 CLI |
 
-这证明代表性 JSON REST 能力可在上述 Kubernetes 版本工作，不表示已经逐个测试所有资源、所有 verbs 或所有 Kubernetes 版本。未验证的边界包括云厂商扩展、实际跨机网络、Service 流量转发/Ingress、Redis Cluster、Redis TLS 和持久化重启、SSH known_hosts，以及本库尚未实现的 watch/exec/attach/port-forward。410 和断线不重放等可控故障仍由模拟测试覆盖。
+这证明代表性 JSON REST 与非交互式 exec 能力可在上述 Kubernetes 版本工作，不表示已经逐个测试所有资源、所有 verbs 或所有 Kubernetes 版本。未验证的边界包括云厂商扩展、实际跨机网络、Service 流量转发/Ingress、Redis Cluster、Redis TLS 和持久化重启、SSH known_hosts，以及本库尚未实现的 watch/交互式 exec/attach/port-forward。410 和断线不重放等可控故障仍由模拟测试覆盖。
 
 ## 结果与维护
 
@@ -61,4 +62,4 @@ mvn test
 mvn --batch-mode --no-transfer-progress -Preal-e2e clean verify
 ```
 
-真实测试通过 Failsafe 的 `*IT` 入口隔离，默认 `mvn test`、普通 CI 和 Maven 发布工作流不会连接 kind。新增内容仅位于 `src/test`、脚本及文档，不进入主 jar、sources、Javadoc，也不向库使用方增加依赖。
+真实测试通过 Failsafe 的 `*IT` 入口隔离，默认 `mvn test`、普通 CI 和 Maven 发布工作流不会连接 kind。这些测试基础设施仅位于 `src/test`、脚本及文档，不进入主 jar、sources、Javadoc，也不向库使用方增加依赖。

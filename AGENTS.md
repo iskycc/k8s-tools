@@ -29,7 +29,7 @@ mvn -Dtest=MainDemoTest test
 mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
 # 无集群的 CLI 启动检查
-java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
+java -cp 'target/k8s-tools-1.5.5-SNAPSHOT.jar:target/dependency/*' \
   com.iskycc.k8s.Main --help
 ```
 
@@ -61,19 +61,23 @@ java -cp 'target/k8s-tools-1.5.2-SNAPSHOT.jar:target/dependency/*' \
 - CLI 的 `--namespace` 只影响资源查询。`null`、空白或 `all` 表示全命名空间；CLI 没有公开全部 Java 配置项。
 - token 来自 Secret，当前没有自动续期；不要承诺“永久有效”。`MasterInfo.toString()` 掩码 token，不要新增记录完整 token、密码或私钥的日志。
 - 从 1.5.2 起使用 SLF4J 输出诊断日志；配置见 [docs/logging.md](docs/logging.md)。初始化结果用 INFO，单请求/命令和轮询细节用 DEBUG，失败及 TLS 降级用 WARN/ERROR。日志不得传入 Throwable、异常消息、原始命令、正文、Redis URL 或 query；使用 `internal.LogSupport` 限长、过滤控制字符和提取 endpoint。HTTP 只记录 UUID 格式 Audit-ID。修改日志需运行 `LoggingTest`，保持请求数量、异常对象和重试语义不变；测试专用 Simple 配置不得进入发布包。
+- 从 1.5.5 起提供 `K8sLogging` 全局调试开关；1.5.2 不含该功能。默认 false，类初始化读取 JVM 属性 `k8s.tools.debug`，运行时 `setDebugEnabled` 对同一 classloader 所有实例生效；DEBUG 必须统一走 `LogSupport.debug`，同时受开关和 provider 级别控制。INFO/WARN/ERROR 不经此开关；不得修改应用或第三方 logger 配置。测试修改全局状态后必须恢复，并覆盖默认关闭、启动参数、运行时切换和必要日志仍可见。
 - SSH 当前接受任意主机密钥。SA/Secret/RBAC 资源名和重试参数在连接前校验，远端绝对路径及 Secret JSON 使用 shell 引号转义；新命令仍需保证外部输入不被当作 shell 代码。
 - SSH 仅配置密码时自动使用密码模式；`SshConfig.Builder.passwordOnly(true)` / CLI `--password-only` 强制忽略显式私钥与口令、本地 `.ssh/config`、默认私钥和 SSH agent。仅保留 password / 单密码 keyboard-interactive，不回退到用户密钥签名认证；混合凭据未强制时保留原先行为。此功能从 `1.2.0` 起提供，`1.1.0` 不包含这些改动，源码更新也不表示远端快照已经更新。
 
 ## 通用资源 API 约定
 
-- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，已有凭据查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，当前源码的 SSH/Redis 全查询 main 示例在 [docs/examples/K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)，运行说明见 [docs/examples/all-queries.md](docs/examples/all-queries.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.5.2-SNAPSHOT`。
+- Maven 使用方配置见 [docs/maven-usage.md](docs/maven-usage.md)，公共 API 与示例见 [docs/library-api.md](docs/library-api.md)，已有凭据查询示例在 [docs/examples/K8sReadExample.java](docs/examples/K8sReadExample.java)，当前源码的 SSH/Redis 全查询 main 示例在 [docs/examples/K8sAllQueriesExample.java](docs/examples/K8sAllQueriesExample.java)，运行说明见 [docs/examples/all-queries.md](docs/examples/all-queries.md)，能力边界见 [docs/api-completeness.md](docs/api-completeness.md)。通用 CRUD 接口从正式版 `1.1.0` 起提供，`1.0.0` 只有查询接口；当前源码开发构建仍为 `1.5.5-SNAPSHOT`。
 - `ResourceDefinition` 明确 apiVersion、plural、Kind 和作用域；`K8sResources` 是常用常量，不是完整 API 清单。CRD 和其他资源用 Discovery 或显式定义，禁止推测 Kind 的复数。
 - 写入使用完整 Gson JSON，保留未知字段并复制输入；原有简化 POJO 只用于读取，不能拿它们做完整 PUT。PUT 要求 `metadata.resourceVersion`，冲突交由调用方合并。
 - 集群资源不能指定 namespace；命名空间资源的单对象读写和集合删除必须有具体 namespace。只有旧 list 快捷方法把字符串 `all` 解释为跨命名空间，新入口的 `all` 是真实命名空间。
 - Discovery verbs 是 API 能力，不是 RBAC 权限。不要把通用 CRUD 描述成每个资源都有全部动作；子资源保留自己的 Kind，动作与准入以服务端为准。
 - HTTP 自动重试和重定向关闭；请求和响应资源在调用结束释放，不要求客户端 close。保持错误状态、正文和响应头，异常默认消息不包含可能敏感的正文。
 - 单页查询保留 continue/resourceVersion；自动分页遇到 410、重复 token、混合版本直接失败，不静默重启。删除成功不表示 finalizer 已完成。
-- 新增流式功能不能复用当前缓冲整个响应的 request 方式；watch/exec/attach/port-forward 尚未支持。
+- 新增流式功能不能复用当前缓冲整个响应的 request 方式；watch/交互式 exec/attach/port-forward 尚未支持。
+- 从 1.5.5 起提供非交互式 `exec` / `execShell`（1.5.2 不含），独立 nv-websocket-client 2.14 通道、v5/v4 remotecommand，固定 stdin=false/tty=false。argv 保留参数边界；shell 仅显式 /bin/sh -c。默认总时限 30 秒、stdout+stderr 4 MiB，非零退出码返回结果；缺失/非法 Status 必须失败。握手异常保留 HTTP 状态和头，NV 无法提供 chunked 正文时为空；不允许为补正文重放请求。Exec 不重试、不重定向、不触发 TLS 降级；关闭连接不保证终止远端进程。测试 `PodExecTest`、`PodExecSshFallbackTest`、`RedisCredentialsTest`、`LoggingTest` 和真实 `RealKubernetesIT` Exec 用例；MockWebServer/OkHttp/Okio/Kotlin 仅 test scope，不能传递给业务方。详情见 [Pod Exec](docs/pod-exec.md)。
+- Pod Exec 默认 AUTO：有 SSH 配置时先探测并缓存 `/version`，低于 1.31（含 1.31 alpha/beta/rc）执行 SSH/kubectl，否则 WebSocket；1.31 是用户选定的兼容策略门槛，不是 WebSocket 最低支持版本。无 SSH 配置维持直接 WebSocket；单次可选 WEBSOCKET/SSH 跳过探测。每次选定通道后、连接执行前仅打印一条 INFO `Pod exec 执行通道 transport=WEBSOCKET/SSH`，覆盖 AUTO 与手动模式，不受全局 DEBUG 开关影响，不记录命令或凭据。探测失败不执行命令、不缓存失败；执行或握手失败后绝不切换通道重放。版本探测、连接和执行共享总时限，取消保留部分输出与线程中断标记。
+- `fromSsh` 返回客户端在内存中保留 SSH 配置，Redis 命中也必须保留；直接 Builder 可用 `execSshConfig`，MasterInfo 不含 SSH 配置。SSH exec 使用独立连接，外部输入逐参数 shell 转义，当前 API 地址/token/CA/TLS 模式通过 stdin 写入权限 600 的临时 kubeconfig，退出时清理，不借用 master 的管理员 kubeconfig；强制断线不保证远端进程/临时文件立即清理。远端需兼容 kubectl、POSIX shell 和可达的 API 地址；严格模式未给 CA 时远端系统信任库与本地 JVM 不同。SSH 结果是 kubectl stdout/stderr/exit-status，kubectl 权限/连接失败通常为非零结果，不伪造 HTTP 状态异常。此回退行为从 1.5.5 起提供。
 
 ## 验证与测试维护
 

@@ -64,11 +64,11 @@ gpg --armor --export-secret-keys 'YOUR_KEY_FINGERPRINT' > /tmp/k8s-tools-release
 ## 发布与使用快照
 
 1. 在 Central Portal 的 Namespaces 页面确认 `io.github.iskycc` 已启用快照；如未启用，通过菜单 **Enable SNAPSHOTs** 开启。参见 [Sonatype 快照发布说明](https://central.sonatype.org/publish/publish-portal-snapshots/)。
-2. 将开发版本（例如 `1.5.2-SNAPSHOT`）提交到 `main`，确认 CI 通过。
-3. 在 Actions → **Publish Snapshot** → Run workflow 选择 `main`，填写与 POM 一致的版本（当前为 `version=1.5.2-SNAPSHOT`）。工作流保留 POM 原版本，执行 `mvn -Psnapshot clean deploy`，复用上述四个 Secrets。
+2. 将开发版本（例如 `1.5.5-SNAPSHOT`）提交到 `main`，确认 CI 通过。
+3. 在 Actions → **Publish Snapshot** → Run workflow 选择 `main`，填写与 POM 一致的版本（当前为 `version=1.5.5-SNAPSHOT`）。工作流保留 POM 原版本，执行 `mvn -Psnapshot clean deploy`，复用上述四个 Secrets。
 4. 检查工作流成功，并验证对应版本的快照元数据及时间戳产物可下载。历史 `1.1.0-SNAPSHOT` 的[快照元数据](https://central.sonatype.com/repository/maven-snapshots/io/github/iskycc/k8s-tools/1.1.0-SNAPSHOT/maven-metadata.xml)可用于参考。
 
-**本次 `1.5.2` 只发布正式版，未发布 `1.5.2-SNAPSHOT`。** 下方保留历史 `1.1.0-SNAPSHOT` 的消费示例，其不包含 `1.2.0` 的仅密码 SSH 模式。
+**本次 `1.5.5` 只发布正式版，未发布 `1.5.5-SNAPSHOT`。** 下方保留历史 `1.1.0-SNAPSHOT` 的消费示例，其不包含 `1.2.0` 的仅密码 SSH 模式。
 
 快照不需要 Git 标签或 GitHub Release，推送代码本身不会自动发布快照。相同快照版本可持续发布新的时间戳构建；它不出现在 Maven Central 正式版仓库，使用方需要额外声明快照仓库：
 
@@ -97,15 +97,15 @@ gpg --armor --export-secret-keys 'YOUR_KEY_FINGERPRINT' > /tmp/k8s-tools-release
 
 ## 发布一个版本
 
-本次发布目标为 `1.5.2`，源码 POM 为 `1.5.2-SNAPSHOT`；发布工作流仅修改临时检出目录的版本。正式版是否已可下载以 [Maven Central 产物](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.5.2/)为准。后续发布必须递增版本，不覆盖已有正式版。
+本次发布目标为 `1.5.5`，源码 POM 为 `1.5.5-SNAPSHOT`；发布工作流仅修改临时检出目录的版本。正式版是否已可下载以 [Maven Central 产物](https://repo1.maven.org/maven2/io/github/iskycc/k8s-tools/1.5.5/)为准。后续发布必须递增版本，不覆盖已有正式版。
 
 1. 将流水线、发布 POM 和许可证提交到仓库，确保目标代码通过 CI。
-2. 确定版本，例如 `1.5.2`。对应标签中的 `pom.xml` 版本必须是 `1.5.2` 或 `1.5.2-SNAPSHOT`。发布下一个版本前，先将开发版本更新为相应的 `X.Y.Z-SNAPSHOT`。
-3. 在 GitHub 创建并发布正式 Release，标签为 `v1.5.2`。标签必须指向包含发布配置的提交。
-4. 工作流检出 `refs/tags/v1.5.2`，核对 POM 后，只在临时检出目录将版本设为 `1.5.2`，执行 `mvn -Prelease clean deploy`。
-5. Actions 上传成功后即结束。在 Central Portal 的 Deployments 确认最终发布结果；发布后再验证消费者能解析 `io.github.iskycc:k8s-tools:1.5.2`。
+2. 确定版本，例如 `1.5.5`。对应标签中的 `pom.xml` 版本必须是 `1.5.5` 或 `1.5.5-SNAPSHOT`。发布下一个版本前，先将开发版本更新为相应的 `X.Y.Z-SNAPSHOT`。
+3. 在 GitHub 创建并发布正式 Release，标签为 `v1.5.5`。标签必须指向包含发布配置的提交。
+4. 工作流检出 `refs/tags/v1.5.5`，核对 POM 后，只在临时检出目录将版本设为 `1.5.5`，执行 `mvn -Prelease clean deploy`。
+5. Actions 上传成功后即结束。在 Central Portal 的 Deployments 确认最终发布结果；发布后再验证消费者能解析 `io.github.iskycc:k8s-tools:1.5.5`。
 
-需要手动运行时，在 Actions → Publish to Maven Central → Run workflow 中输入已有标签，如 `v1.5.2`。手动运行也会自动发布，并非仅构建预览。
+需要手动运行时，在 Actions → Publish to Maven Central → Run workflow 中输入已有标签，如 `v1.5.5`。手动运行也会自动发布，并非仅构建预览。
 
 Maven Central 的正式版本不可覆盖。失败后重试前先确认 Portal 中的部署状态；如果已经发布成功，应使用新版本。相同标签的工作流会串行运行，但这不会让重复发布同一版本变得可行。
 
@@ -117,7 +117,7 @@ Maven Central 的正式版本不可覆盖。失败后重试前先确认 Portal �
 # 在独立工作副本中，将版本设为待验证的正式版本
 mvn --batch-mode --no-transfer-progress \
   org.codehaus.mojo:versions-maven-plugin:2.22.0:set \
-  -DnewVersion=1.5.2 -DgenerateBackupPoms=false
+  -DnewVersion=1.5.5 -DgenerateBackupPoms=false
 
 # 测试并生成主 jar、源码和 Javadoc，不签名、不上传
 mvn --batch-mode --no-transfer-progress -Prelease -Dgpg.skip=true clean verify

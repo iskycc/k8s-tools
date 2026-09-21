@@ -95,6 +95,9 @@ public class K8sApiClient {
 
     private final String apiServer;
     private final String token;
+    private final SshConfig execSshConfig;
+    private final String execCaCertPem;
+    private volatile PodExecVersion execVersion;
     private final boolean tlsAutoFallback;
     private final boolean insecureConfigured;
     private final int connectTimeoutMs;
@@ -108,6 +111,8 @@ public class K8sApiClient {
     private K8sApiClient(Builder b) {
         this.apiServer = stripTrailingSlash(b.apiServer);
         this.token = b.token;
+        this.execSshConfig = b.execSshConfig;
+        this.execCaCertPem = b.caCertPem;
         this.connectTimeoutMs = b.connectTimeoutMs;
         this.readTimeoutMs = b.readTimeoutMs;
         this.tlsAutoFallback = b.tlsAutoFallback;
@@ -121,6 +126,103 @@ public class K8sApiClient {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    /**
+     * 在 Pod 中执行命令：有 SSH 配置时 AUTO 对低于 1.31 的集群选 SSH，其余使用 API WebSocket。
+     * command 是 argv，每个参数独立传入，如 exec(ns, pod, "ls", "-l", "/tmp")；不隐式解析 shell。
+     * 默认无 stdin/TTY，返回分离的 stdout、stderr 和退出码；30 秒超时、4 MiB 输出上限。
+     * Exec 不自动重试、不因 TLS 失败降级，防止命令重复执行。
+     */
+    public PodExecResult exec(String namespace, String podName, String... command) {
+        return exec(namespace, podName, PodExecOptions.builder().build(), command);
+    }
+
+    /** 指定容器、总超时及输出上限的 Pod Exec。 */
+    public PodExecResult exec(String namespace, String podName, PodExecOptions options, String... command) {
+        PodExecTransport.validate(namespace, podName, options, command);
+        String[] args = command.clone();
+        if (options.getTransport() == PodExecOptions.Transport.SSH && execSshConfig == null) {
+            throw new IllegalStateException("SSH exec requires fromSsh or Builder.execSshConfig");
+        }
+        if (options.getTransport() == PodExecOptions.Transport.WEBSOCKET
+                || (options.getTransport() == PodExecOptions.Transport.AUTO && execSshConfig == null)) {
+            logExecTransport(PodExecOptions.Transport.WEBSOCKET, namespace, podName, options, null);
+            return execWebSocket(namespace, podName, options, args);
+        }
+        long started = System.nanoTime();
+        try {
+            PodExecResult result = PodExecOperation.run(options, operation -> {
+                boolean useSsh = options.getTransport() == PodExecOptions.Transport.SSH;
+                PodExecVersion version = null;
+                if (!useSsh) {
+                    version = execVersion;
+                    if (version == null) {
+                        // 只探测，不执行命令；使用当前 TLS 设置，不触发读取自动降级。
+                        int remaining = operation.remainingMs();
+                        version = PodExecVersion.parse(doRequest("GET", requestUri("/version", null), null, null,
+                                remaining, remaining, operation).getBody());
+                        operation.check();
+                        execVersion = version;
+                        LogSupport.debug(LOG, "Pod exec 版本已识别 server={} version={}", LogSupport.endpoint(apiServer), version);
+                    }
+                    useSsh = version.useSsh();
+                }
+                operation.check();
+                logExecTransport(useSsh ? PodExecOptions.Transport.SSH : PodExecOptions.Transport.WEBSOCKET,
+                        namespace, podName, options, version);
+                if (useSsh) {
+                    TlsSettings tls = tlsSettings;
+                    LogSupport.debug(LOG, "Pod exec SSH 开始 namespace={} pod={} container={}",
+                            namespace, podName, options.getContainer());
+                    return PodExecSshTransport.execute(execSshConfig, apiServer, token, execCaCertPem,
+                            tls.verifier == INSECURE_HOSTNAME_VERIFIER, namespace, podName, options, args, operation);
+                }
+                PodExecOptions remaining = PodExecOptions.builder().container(options.getContainer())
+                        .timeoutMs(operation.remainingMs()).maxOutputBytes(options.getMaxOutputBytes())
+                        .transport(PodExecOptions.Transport.WEBSOCKET).build();
+                TlsSettings tls = tlsSettings;
+                return PodExecTransport.execute(apiServer, token, tls.context, tls.verifier != INSECURE_HOSTNAME_VERIFIER,
+                        connectTimeoutMs, namespace, podName, remaining, args, operation);
+            });
+            LogSupport.debug(LOG, "Pod exec 调用完成 namespace={} pod={} exitCode={} elapsedMs={}",
+                    namespace, podName, result.getExitCode(), LogSupport.elapsedMs(started));
+            if (!result.isSuccess()) {
+                LOG.warn("Pod exec 命令返回非零状态 namespace={} pod={} exitCode={}", namespace, podName, result.getExitCode());
+            }
+            return result;
+        } catch (K8sApiException e) {
+            LOG.warn("Pod exec 调用失败 namespace={} pod={} status={} failure={} elapsedMs={} errorType={}",
+                    namespace, podName, e.getStatusCode(),
+                    e instanceof PodExecException ? ((PodExecException) e).getFailureReason() : "HTTP",
+                    LogSupport.elapsedMs(started), LogSupport.errorType(e));
+            throw e;
+        }
+    }
+
+    private void logExecTransport(PodExecOptions.Transport transport, String namespace, String podName,
+                                  PodExecOptions options, PodExecVersion version) {
+        LOG.info("Pod exec 执行通道 transport={} mode={} version={} server={} namespace={} pod={} container={}",
+                transport, options.getTransport(), version == null ? "-" : version.toString(),
+                LogSupport.endpoint(apiServer), LogSupport.field(namespace), LogSupport.field(podName),
+                LogSupport.field(options.getContainer()));
+    }
+
+    private PodExecResult execWebSocket(String namespace, String podName, PodExecOptions options, String[] command) {
+        TlsSettings tls = tlsSettings;
+        return PodExecTransport.execute(apiServer, token, tls.context, tls.verifier != INSECURE_HOSTNAME_VERIFIER,
+                connectTimeoutMs, namespace, podName, options, command);
+    }
+
+    /** 执行整条命令，如 execShell(ns, pod, "ls -al /tmp")；由容器内 /bin/sh -c 解释。 */
+    public PodExecResult execShell(String namespace, String podName, String command) {
+        return execShell(namespace, podName, PodExecOptions.builder().build(), command);
+    }
+
+    /** shell 文本来自调用方，避免拼接不可信输入；支持与 exec 相同的选项。 */
+    public PodExecResult execShell(String namespace, String podName, PodExecOptions options, String command) {
+        if (command == null || command.trim().isEmpty()) { throw new IllegalArgumentException("command is required"); }
+        return exec(namespace, podName, options, "/bin/sh", "-c", command);
     }
 
     /** 自动发现 API 地址并直接跳过证书及主机名校验，首次写请求同样适用。 */
@@ -315,7 +417,7 @@ public class K8sApiClient {
         long started = System.nanoTime();
         String server = LogSupport.endpoint(apiServer);
         String route = LogSupport.field(uri.getRawPath());
-        LOG.debug("API 请求开始 requestId={} method={} server={} path={}", requestId, verb, server, route);
+        LogSupport.debug(LOG, "API 请求开始 requestId={} method={} server={} path={}", requestId, verb, server, route);
         try {
             ApiResponse response;
             try {
@@ -332,7 +434,7 @@ public class K8sApiClient {
                     throw e;
                 }
             }
-            LOG.debug("API 请求完成 requestId={} method={} server={} path={} status={} auditId={} elapsedMs={}",
+            LogSupport.debug(LOG, "API 请求完成 requestId={} method={} server={} path={} status={} auditId={} elapsedMs={}",
                     requestId, verb, server, route, response.getStatusCode(),
                     LogSupport.auditId(response.getHeaders()), LogSupport.elapsedMs(started));
             return response;
@@ -341,7 +443,7 @@ public class K8sApiClient {
             String format = "API 请求失败 requestId={} method={} server={} path={} status={} auditId={} elapsedMs={} errorType={}";
             Object[] details = {requestId, verb, server, route, e.getStatusCode(),
                     LogSupport.auditId(e.getResponseHeaders()), LogSupport.elapsedMs(started), LogSupport.errorType(e)};
-            if (e.getStatusCode() == 404) { LOG.debug(format, details); }
+            if (e.getStatusCode() == 404) { LogSupport.debug(LOG, format, details); }
             else { LOG.warn(format, details); }
             throw e;
         }
@@ -401,6 +503,11 @@ public class K8sApiClient {
     }
 
     private ApiResponse doRequest(String method, URI uri, String body, String contentType) {
+        return doRequest(method, uri, body, contentType, connectTimeoutMs, readTimeoutMs, null);
+    }
+
+    private ApiResponse doRequest(String method, URI uri, String body, String contentType,
+                                  int connectTimeoutMs, int readTimeoutMs, PodExecOperation operation) {
         TlsSettings tls = tlsSettings;
         BasicHttpClientConnectionManager manager = BasicHttpClientConnectionManager.create(
                 RegistryBuilder.<TlsSocketStrategy>create().register("https",
@@ -422,6 +529,7 @@ public class K8sApiClient {
         }
         try (CloseableHttpClient http = HttpClients.custom().setConnectionManager(manager)
                 .disableRedirectHandling().disableAutomaticRetries().disableCookieManagement().build()) {
+            if (operation != null) { operation.onCancel(request::cancel); }
             return http.execute(request, response -> {
                 String text = response.getEntity() == null ? ""
                         : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
@@ -567,6 +675,7 @@ public class K8sApiClient {
     // ==================== Builder ====================
 
     public static final class Builder {
+        private SshConfig execSshConfig;
         private String apiServer;
         private String token;
         private String caCertPem;
@@ -578,6 +687,9 @@ public class K8sApiClient {
         private int readTimeoutMs = 30000;
         private String redisUrl;
         private boolean refreshCache;
+
+        /** 为 Pod Exec 提供 SSH 兜底；直接 API 接入时可选，fromSsh 自动保留传入配置。 */
+        public Builder execSshConfig(SshConfig config) { this.execSshConfig = config; return this; }
 
         public Builder apiServer(String apiServer) { this.apiServer = apiServer; return this; }
         public Builder token(String token) { this.token = token; return this; }
@@ -641,14 +753,15 @@ public class K8sApiClient {
                     return K8sApiClient.builder().apiServer(info.getApiServerUrl()).token(info.getToken())
                             .caCertPem(skipTls ? null : info.getCaCertPem())
                             .insecureSkipTlsVerify(skipTls).tlsAutoFallback(tlsAutoFallback)
-                            .connectTimeoutMs(connectTimeoutMs).readTimeoutMs(readTimeoutMs).build();
+                            .connectTimeoutMs(connectTimeoutMs).readTimeoutMs(readTimeoutMs)
+                            .execSshConfig(execSshConfig == null ? config : execSshConfig).build();
                 }
             } catch (RuntimeException e) {
                 LOG.error("SSH 客户端初始化失败 host={} elapsedMs={} errorType={}",
                         LogSupport.field(config.getHost()), LogSupport.elapsedMs(started), LogSupport.errorType(e));
                 throw e;
             } finally {
-                LOG.debug("SSH 客户端初始化结束 host={} elapsedMs={}",
+                LogSupport.debug(LOG, "SSH 客户端初始化结束 host={} elapsedMs={}",
                         LogSupport.field(config.getHost()), LogSupport.elapsedMs(started));
             }
         }

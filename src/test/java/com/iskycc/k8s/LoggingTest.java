@@ -14,11 +14,16 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -34,9 +39,12 @@ public class LoggingTest {
     private PrintStream previousError;
     private PrintStream capture;
     private ByteArrayOutputStream output;
+    private boolean previousDebugEnabled;
 
     @Before
     public void captureLogs() throws Exception {
+        previousDebugEnabled = K8sLogging.isDebugEnabled();
+        K8sLogging.setDebugEnabled(true);
         previousError = System.err;
         output = new ByteArrayOutputStream();
         capture = new PrintStream(output, true, "UTF-8");
@@ -45,6 +53,7 @@ public class LoggingTest {
 
     @After
     public void restoreOutput() {
+        K8sLogging.setDebugEnabled(previousDebugEnabled);
         System.setErr(previousError);
         capture.close();
     }
@@ -152,6 +161,97 @@ public class LoggingTest {
         assertTrue(logs().contains("stage=ssh.connect"));
         assertTrue(logs().contains("errorType=RuntimeException"));
         assertSafe(logs());
+    }
+
+    @Test
+    public void productionSwitchSuppressesAllComponentsDebugButKeepsNecessaryLogs() throws Exception {
+        // 测试 provider 已开启本库 DEBUG；验证开关自身能禁止输出，而非依靠 provider 过滤。
+        K8sLogging.setDebugEnabled(false);
+        try (MockRedisServer redis = new MockRedisServer();
+             MockK8sApiServer api = new MockK8sApiServer(TOKEN);
+             MockK8sMasterServer master = new MockK8sMasterServer(MockK8sMasterServer.SaScenario.FRESH_CLUSTER,
+                     "root", PASSWORD, api.getBaseUrl(), TOKEN, api.getCaCertPem())) {
+            master.start();
+            SshConfig ssh = SshConfig.builder().host("127.0.0.1").port(master.getPort())
+                    .username("root").password(PASSWORD).passwordOnly(true).build();
+            String redisUrl = "redis://127.0.0.1:" + redis.getPort() + "/0";
+            ServiceTokenFetcher.Options options = new ServiceTokenFetcher.Options().tokenWaitIntervalMs(1);
+            K8sApiClient client = K8sApiClient.builder().redisUrl(redisUrl).fromSsh(ssh, options);
+            K8sApiClient.builder().redisUrl(redisUrl).fromSsh(ssh, options);
+            client.getVersion();
+            api.enqueueResponse(403, BODY);
+            assertThrows(K8sApiException.class, client::listNodes);
+            redis.failCommand("MGET");
+            assertThrows(K8sToolsException.class,
+                    () -> K8sApiClient.builder().redisUrl(redisUrl).fromSsh(ssh, options));
+            assertFalse(logs().contains("DEBUG com.iskycc.k8s"));
+            assertFalse(logs().contains("SSH 命令完成"));
+            assertFalse(logs().contains("API 请求开始"));
+            assertFalse(logs().contains("等待 token Secret"));
+            assertTrue(logs().contains("SSH 连接成功"));
+            assertTrue(logs().contains("source=redis"));
+            assertTrue(logs().contains("WARN com.iskycc.k8s.api.K8sApiClient"));
+            assertTrue(logs().contains("status=403"));
+            assertTrue(logs().contains("ERROR com.iskycc.k8s.ssh.RedisServiceTokenCache"));
+            assertTrue(logs().contains("stage=cache.read"));
+            assertSafe(logs());
+
+            // 运行时切换立即作用于同一个已构造客户端，不需要重新获取凭据。
+            output.reset();
+            K8sLogging.setDebugEnabled(true);
+            client.getVersion();
+            assertTrue(logs().contains("API 请求开始"));
+            assertTrue(logs().contains("API 请求完成"));
+            output.reset();
+            K8sLogging.setDebugEnabled(false);
+            client.getVersion();
+            assertFalse(logs().contains("DEBUG com.iskycc.k8s"));
+            assertEquals(4, api.getRequestCount());
+        }
+    }
+
+    @Test
+    public void startupPropertyDefaultsToOffAndCanExplicitlyEnableDebug() throws Exception {
+        assertEquals("false", startupSwitch(null));
+        assertEquals("true", startupSwitch("true"));
+        assertEquals("false", startupSwitch("false"));
+    }
+
+    private String startupSwitch(String value) throws Exception {
+        List<String> command = new ArrayList<String>();
+        command.add(Paths.get(System.getProperty("java.home"), "bin", "java").toString());
+        if (value != null) { command.add("-D" + K8sLogging.DEBUG_PROPERTY + "=" + value); }
+        command.add("-cp");
+        command.add(System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")));
+        command.add(StartupProbe.class.getName());
+        ProcessBuilder builder = new ProcessBuilder(command);
+        // 子进程独立验证默认值，不继承测试宿主可能注入的 JVM 开关。
+        builder.environment().remove("JAVA_TOOL_OPTIONS");
+        builder.environment().remove("JDK_JAVA_OPTIONS");
+        builder.environment().remove("_JAVA_OPTIONS");
+        Process process = builder.start();
+        try {
+            assertTrue("开关探测应及时完成", process.waitFor(10, TimeUnit.SECONDS));
+            assertEquals(0, process.exitValue());
+            try (InputStream input = process.getInputStream();
+                 ByteArrayOutputStream result = new ByteArrayOutputStream()) {
+                int valueRead;
+                while ((valueRead = input.read()) != -1) { result.write(valueRead); }
+                return new String(result.toByteArray(), StandardCharsets.UTF_8).trim();
+            }
+        } finally {
+            process.destroyForcibly();
+            process.getInputStream().close();
+            process.getErrorStream().close();
+            process.getOutputStream().close();
+        }
+    }
+
+    /** 子 JVM 入口只验证初始化读取，不连接任何服务。 */
+    public static final class StartupProbe {
+        public static void main(String[] args) {
+            System.out.println(K8sLogging.isDebugEnabled());
+        }
     }
 
     private String logs() { return new String(output.toByteArray(), StandardCharsets.UTF_8); }

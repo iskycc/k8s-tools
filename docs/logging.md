@@ -2,9 +2,33 @@
 
 从 `1.5.2` 起，本库通过 SLF4J 2.x 输出诊断日志，logger 名称为 `com.iskycc.k8s` 下的具体类名。业务应用使用已有的兼容 provider 和日志配置；本库只传递日志 API，不替换应用的日志实现。SLF4J 没有 provider 时会丢弃日志，详见 [SLF4J 官方说明](https://www.slf4j.org/manual.html)。
 
-## 启用日志
+## 全局调试开关（1.5.5 起）
 
-已有日志框架的应用，将 `com.iskycc.k8s` 配置为 `INFO`，需要查看单次请求时临时调整为 `DEBUG`。例如已有 Logback 配置可在 `<configuration>` 中增加：
+`1.5.5` 新增 `K8sLogging`，**默认关闭调试日志**。使用该开关需引用 `1.5.5` 或更新版本；`1.5.2` 不包含这个开关，仍通过日志框架级别控制输出。
+
+生产环境保持默认即可，也可显式传入 JVM 参数：
+
+```bash
+java -Dk8s.tools.debug=false ...
+```
+
+或在 Java 程序中统一设置：
+
+```java
+import com.iskycc.k8s.K8sLogging;
+
+K8sLogging.setDebugEnabled(false); // 生产：只保留 INFO、WARN、ERROR
+K8sLogging.setDebugEnabled(true);  // 排查：允许输出 DEBUG
+boolean enabled = K8sLogging.isDebugEnabled();
+```
+
+开关作用于同一 classloader 中所有新建和已有客户端，以及 SSH、Redis、凭据获取组件。启动参数 `-Dk8s.tools.debug=true` 在类首次初始化时读取，后续通过 `setDebugEnabled` 动态切换，无需重建客户端。关闭时，即使应用的 root logger 为 DEBUG，本库也不会输出 DEBUG；正常初始化结果、失败、TLS 降级等 INFO/WARN/ERROR 仍按日志框架的级别和 appender 配置输出。
+
+开关不改变第三方组件的日志级别、异常与请求行为，也不关闭 CLI/Demo 的业务查询输出。没有日志 provider 或 provider 设置为 ERROR/OFF 时，不保证 INFO/WARN 可见。
+
+## 配置日志实现和级别
+
+已有日志框架的应用，生产环境可将 `com.iskycc.k8s` 配置为 `INFO`。需要查看单次请求时，**同时开启本库开关和 provider 的 DEBUG**；本库不会覆盖应用的日志框架配置。例如已有 Logback 配置可在 `<configuration>` 中增加：
 
 ```xml
 <logger name="com.iskycc.k8s" level="DEBUG"/>
@@ -33,7 +57,8 @@ mkdir -p target/examples
 javac -encoding UTF-8 -source 8 -target 8 \
   -cp 'target/classes:target/dependency/*' -d target/examples \
   docs/examples/K8sAllQueriesExample.java
-java -Dorg.slf4j.simpleLogger.defaultLogLevel=warn \
+java -Dk8s.tools.debug=true \
+  -Dorg.slf4j.simpleLogger.defaultLogLevel=warn \
   -Dorg.slf4j.simpleLogger.log.com.iskycc.k8s=debug \
   -Dorg.slf4j.simpleLogger.showDateTime=true \
   -Dorg.slf4j.simpleLogger.dateTimeFormat='yyyy-MM-dd HH:mm:ss.SSS' \
@@ -41,7 +66,7 @@ java -Dorg.slf4j.simpleLogger.defaultLogLevel=warn \
   K8sAllQueriesExample 2>target/k8s-tools.log
 ```
 
-先按[全查询 Demo](examples/all-queries.md)配置 SSH/Redis 环境变量。CLI 使用相同 JVM 日志参数，把主类换为 `com.iskycc.k8s.Main` 并传入 CLI 参数即可。Simple 默认 INFO、写入 stderr，资源查询结果仍写 stdout；上述 `-D` 参数只适用于 Simple，其他 provider 通过自己的配置调整。配置字段见 [SimpleLogger 文档](https://www.slf4j.org/apidocs/org/slf4j/simple/SimpleLogger.html)。
+先按[全查询 Demo](examples/all-queries.md)配置 SSH/Redis 环境变量。CLI 使用相同 JVM 日志参数，把主类换为 `com.iskycc.k8s.Main` 并传入 CLI 参数即可。Simple 默认 INFO、写入 stderr，资源查询结果仍写 stdout；`k8s.tools.debug` 对所有 provider 生效，`org.slf4j.simpleLogger.*` 参数只适用于 Simple，其他 provider 通过自己的配置调整。配置字段见 [SimpleLogger 文档](https://www.slf4j.org/apidocs/org/slf4j/simple/SimpleLogger.html)。
 
 ## 如何定位
 
@@ -58,6 +83,7 @@ java -Dorg.slf4j.simpleLogger.defaultLogLevel=warn \
 | API 请求开始/完成 | DEBUG：进程内递增 `requestId`、method、server、path、status、`auditId` 和 `elapsedMs` |
 | API 请求失败 | WARN：HTTP 错误或网络错误（`status=-1`）；404 常用于存在性检查，放在 DEBUG |
 | TLS 降级、SA 删除重建、CA 缺失 | WARN：显示发生的兼容回退或有副作用的操作 |
+| Pod Exec（1.5.5 起） | INFO：每次选定通道后打印 `transport=WEBSOCKET` 或 `transport=SSH`，含 mode、version、server、namespace、pod、container，DEBUG 关闭时仍保留；DEBUG：识别版本、开始与完成，WebSocket 按 execId 关联；WARN：非零退出码、版本探测/HTTP/协议失败、超时、中断。不记录命令和输出 |
 
 API 请求开始和最终结果共享 `requestId`，可区分并发请求；它只用于当前进程的日志，没有发给服务端。服务端返回合法 UUID 格式的 `Audit-Id` 时输出 `auditId`，可据此关联 Kubernetes 审计记录，未返回或格式不合法时为 `-`。审计记录是否可用取决于集群配置。
 
@@ -67,4 +93,4 @@ API 请求开始和最终结果共享 `requestId`，可区分并发请求；它�
 
 本库新增的诊断日志不输出 token、SSH/Redis 密码、私钥、CA 正文、SSH 原始命令/stdout/stderr、HTTP 请求/响应正文、Authorization 或查询参数。Redis URL 只记录协议、主机、端口；异常只记录类型，原异常及响应体仍可由调用方捕获检查。不要直接把可能带正文的异常原因链或 `ExecResult` 输出到公共日志。
 
-日志保留 master、SSH 用户、namespace、资源路径，外部字段限长并处理控制字符。排查时只开启 `com.iskycc.k8s` 的 DEBUG；第三方 HTTP wire/SSH 协议日志及应用自行打印的正文不受本库过滤控制。
+日志保留 master、SSH 用户、namespace、资源路径，外部字段限长并处理控制字符。排查时开启本库开关，并仅将 `com.iskycc.k8s` 的级别设为 DEBUG；第三方 HTTP wire/SSH 协议日志及应用自行打印的正文不受本库开关或过滤控制。

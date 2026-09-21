@@ -59,7 +59,7 @@ public final class RedisServiceTokenCache {
         }
         if (values.get(0) == null || values.get(0).trim().isEmpty()
                 || !ServiceTokenFetcher.isValidApiServerUrl(values.get(1)) || values.get(2) == null) {
-            LOG.debug("Redis 缓存未命中 master={} reason=missing-or-incomplete elapsedMs={}",
+            LogSupport.debug(LOG, "Redis 缓存未命中 master={} reason=missing-or-incomplete elapsedMs={}",
                     LogSupport.field(masterIp), LogSupport.elapsedMs(started));
             return null;
         }
@@ -67,13 +67,13 @@ public final class RedisServiceTokenCache {
             JsonObject metadata = JsonParser.parseString(values.get(2)).getAsJsonObject();
             if (metadata.get("version").getAsInt() != 1
                     || !context.equals(metadata.get("context").getAsString())) {
-                LOG.debug("Redis 缓存未命中 master={} reason=config-changed elapsedMs={}",
+                LogSupport.debug(LOG, "Redis 缓存未命中 master={} reason=config-changed elapsedMs={}",
                         LogSupport.field(masterIp), LogSupport.elapsedMs(started));
                 return null;
             }
             String ca = metadata.has("caCertPem") && !metadata.get("caCertPem").isJsonNull()
                     ? metadata.get("caCertPem").getAsString() : null;
-            LOG.debug("Redis 缓存命中 master={} elapsedMs={}", LogSupport.field(masterIp), LogSupport.elapsedMs(started));
+            LogSupport.debug(LOG, "Redis 缓存命中 master={} elapsedMs={}", LogSupport.field(masterIp), LogSupport.elapsedMs(started));
             return new MasterInfo(values.get(1), values.get(0), ca,
                     metadata.get("serviceAccount").getAsString(),
                     metadata.get("serviceAccountNamespace").getAsString());

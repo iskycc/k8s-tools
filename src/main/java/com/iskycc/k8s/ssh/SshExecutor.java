@@ -21,6 +21,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -41,8 +42,9 @@ public class SshExecutor implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(SshExecutor.class);
     private final SshConfig config;
-    private SshClient client;
-    private ClientSession session;
+    private volatile SshClient client;
+    private volatile ClientSession session;
+    private volatile boolean cancelled;
 
     public SshExecutor(SshConfig config) {
         if (config == null) {
@@ -55,6 +57,7 @@ public class SshExecutor implements Closeable {
      * 建立 SSH 会话并完成认证（幂等）。
      */
     public synchronized void connect() {
+        checkCancelled();
         if (session != null && session.isOpen()) {
             return;
         }
@@ -75,6 +78,7 @@ public class SshExecutor implements Closeable {
                         UserAuthPasswordFactory.INSTANCE, UserAuthKeyboardInteractiveFactory.INSTANCE));
             }
             client.start();
+            checkCancelled();
             ClientSession s = client
                     .connect(config.getUsername(), config.getHost(), config.getPort())
                     .verify(config.getConnectTimeoutMs())
@@ -92,6 +96,7 @@ public class SshExecutor implements Closeable {
             stage = "authenticate";
             s.auth().verify(config.getConnectTimeoutMs());
             this.session = s;
+            checkCancelled();
             LOG.info("SSH 连接成功 host={} port={} elapsedMs={}",
                     LogSupport.field(config.getHost()), config.getPort(), LogSupport.elapsedMs(started));
         } catch (K8sToolsException e) {
@@ -150,7 +155,7 @@ public class SshExecutor implements Closeable {
                 throw new K8sToolsException("SSH 命令执行超时(" + timeoutMs + "ms): " + command);
             }
             Integer exit = channel.getExitStatus();
-            LOG.debug("SSH 命令完成 host={} exitCode={} elapsedMs={} timeoutMs={}",
+            LogSupport.debug(LOG, "SSH 命令完成 host={} exitCode={} elapsedMs={} timeoutMs={}",
                     LogSupport.field(config.getHost()), exit == null ? -1 : exit,
                     LogSupport.elapsedMs(started), timeoutMs);
             return new ExecResult(exit == null ? -1 : exit,
@@ -172,6 +177,42 @@ public class SshExecutor implements Closeable {
     /** 使用默认 30s 超时执行命令。 */
     public ExecResult exec(String command) {
         return exec(command, 30000);
+    }
+
+    /**
+     * 内部流式执行入口：stdin 可传递临时配置，stdout/stderr 由调用方限制和收集。
+     * 不申请 PTY，不记录命令、输入或输出；返回 SSH exit-status，缺失时为 -1。
+     * 调用方负责总时限及必要时 cancel，流的生命周期由调用方管理。
+     */
+    public int execStreaming(String command, InputStream input, OutputStream output, OutputStream error,
+                             int timeoutMs) throws IOException {
+        if (timeoutMs <= 0) { throw new IllegalArgumentException("timeoutMs must be > 0"); }
+        connect();
+        checkCancelled();
+        try (ClientChannel channel = session.createExecChannel(command)) {
+            channel.setIn(input);
+            channel.setOut(output);
+            channel.setErr(error);
+            checkCancelled();
+            channel.open().verify(timeoutMs);
+            channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), timeoutMs);
+            checkCancelled();
+            Integer exit = channel.getExitStatus();
+            return exit == null ? -1 : exit;
+        }
+    }
+
+    /** 取消当前实例，主动打断连接/认证/执行；取消后不可复用。 */
+    public void cancel() {
+        cancelled = true;
+        SshClient active = client;
+        if (active != null) { active.close(true); }
+    }
+
+    private void checkCancelled() {
+        if (cancelled || Thread.currentThread().isInterrupted()) {
+            throw new K8sToolsException("SSH operation cancelled");
+        }
     }
 
     private static String rootMessage(Throwable t) {

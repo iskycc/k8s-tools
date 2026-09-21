@@ -8,14 +8,14 @@
 | --- | --- |
 | groupId | `io.github.iskycc` |
 | artifactId | `k8s-tools` |
-| 正式版本 | `1.5.2`，新增诊断日志；包含客户端托管 Redis、完整查询 Demo、通用 CRUD、Discovery、分页和子资源接口 |
+| 正式版本 | `1.5.5`，新增 Pod Exec、旧集群 SSH 回退与全局调试开关；包含客户端托管 Redis、完整查询 Demo、通用 CRUD、Discovery、分页和子资源接口 |
 | 历史快照 | `1.1.0-SNAPSHOT`，需要额外仓库，不含 1.2.0 的 SSH 改动 |
-| 当前源码开发版本 | `1.5.2-SNAPSHOT`，本次不发布该快照，可从源码安装到本地 |
+| 当前源码开发版本 | `1.5.5-SNAPSHOT`，本次不发布该快照，可从源码安装到本地 |
 | Java 包名 | `com.iskycc.k8s`，与 Maven groupId 不同 |
 | 使用环境 | JDK 8+、Maven 3.6.3+ |
 | 依赖类型 | 普通 jar，默认 `compile` scope，无需 classifier |
 
-本次正式版坐标为 `1.5.2`，发布完成后可下载；需要试用快照时再切换版本与仓库。旧版 `1.0.0` 只有查询接口，不能编译本指南中的通用 CRUD 调用。
+本次正式版坐标为 `1.5.5`，发布完成后可下载；需要试用快照时再切换版本与仓库。旧版 `1.0.0` 只有查询接口，不能编译本指南中的通用 CRUD 调用。
 
 ## 现有项目添加正式版依赖
 
@@ -25,7 +25,7 @@
 <dependency>
   <groupId>io.github.iskycc</groupId>
   <artifactId>k8s-tools</artifactId>
-  <version>1.5.2</version>
+  <version>1.5.5</version>
 </dependency>
 ```
 
@@ -54,7 +54,7 @@
     <dependency>
       <groupId>io.github.iskycc</groupId>
       <artifactId>k8s-tools</artifactId>
-      <version>1.5.2</version>
+      <version>1.5.5</version>
     </dependency>
   </dependencies>
 
@@ -102,7 +102,7 @@ Windows 的 classpath 使用 `;` 分隔并用双引号包裹。示例的环境�
 
 ## 使用快照版本
 
-以下以历史快照 `1.1.0-SNAPSHOT` 为例，它不包含 `1.2.0` 的仅密码 SSH 模式。当前源码为 `1.5.2-SNAPSHOT`，本次只发布正式版，不上传新快照。使用历史快照时将依赖版本改为 `1.1.0-SNAPSHOT`，并在使用方 POM 的 `<project>` 下增加与 `<dependencies>` 同级的 `<repositories>`：
+以下以历史快照 `1.1.0-SNAPSHOT` 为例，它不包含 `1.2.0` 的仅密码 SSH 模式。当前源码为 `1.5.5-SNAPSHOT`，本次只发布正式版，不上传新快照。使用历史快照时将依赖版本改为 `1.1.0-SNAPSHOT`，并在使用方 POM 的 `<project>` 下增加与 `<dependencies>` 同级的 `<repositories>`：
 
 ```xml
 <repositories>
@@ -129,6 +129,8 @@ Windows 的 classpath 使用 `;` 分隔并用双引号包裹。示例的环境�
 
 如果使用公司 Nexus/Artifactory 或 `mirrorOf=*`，请求可能全部转发到镜像，单独添加上面的仓库仍可能找不到快照。需要让镜像代理这个快照仓库，或由镜像管理员配置适当的路由。
 
+[Pod Exec](pod-exec.md) 与全局调试开关从 `1.5.5` 起提供，引用上述正式版坐标即可使用。
+
 ## 依赖、日志与打包
 
 `1.3.0` 新增 Jedis `5.2.0`、Commons Pool `2.13.1` 和 JSON-java `20260814`，用于 [Redis 凭据缓存](redis-cache.md)；已有正式版 `1.2.1` 的依赖不变。
@@ -140,7 +142,8 @@ Windows 的 classpath 使用 `;` 分隔并用双引号包裹。示例的环境�
 - 从 `1.2.1` 起采用 SLF4J `2.0.19`，需搭配兼容 2.x 的日志 provider；已发布的 `1.2.0` 仍为 1.7.x。升级本库时同时核对业务项目的日志实现，不能只替换 API jar 而保留旧的 1.7 binding。
 - `sources` 和 `javadoc` 是 IDE 查看源码/文档的附件，不要将其作为业务依赖的 classifier。
 - 自己的可执行 jar 是否包含依赖由使用方的打包方式决定；上面的示例通过 `target/dependency/*` 提供运行时依赖。
-- JUnit、Hamcrest、Bouncy Castle 仅为本库测试使用，不向下游传递；本库的主 jar、sources 和 Javadoc 不包含测试代码或模拟服务。POM 中的 `test` 声明不等于发布了这些测试依赖。
+- `1.5.5` 新增 `nv-websocket-client:2.14` 作为 Pod Exec 的必要运行依赖。
+- JUnit、Hamcrest、Bouncy Castle，以及 MockWebServer/OkHttp/Okio/Kotlin，仅为本库测试使用，不向下游传递；本库的主 jar、sources 和 Javadoc 不包含测试代码或模拟服务。POM 中的 `test` 声明不等于发布了这些测试依赖。
 
 ## 验证与常见问题
 
@@ -161,7 +164,7 @@ mvn dependency:resolve -Dclassifier=javadoc -DincludeGroupIds=io.github.iskycc
 | 现象 | 检查与处理 |
 | --- | --- |
 | 找不到 `com.iskycc.k8s` | 确认依赖在实际模块的 `<dependencies>` 中，scope 不是 `test`，然后重新加载 Maven 项目 |
-| 找不到 `resource`、`configMaps` 等方法 | 查看依赖树是否仍选中了 `1.0.0`；将坐标版本设为 `1.5.2` |
+| 找不到 `resource`、`configMaps` 等方法 | 查看依赖树是否仍选中了 `1.0.0`；将坐标版本设为 `1.5.5` |
 | 找不到 Builder 的 `redisUrl`、`refreshCache`、`fromSsh` 方法 | 从正式版 `1.5.0` 起提供；检查依赖树是否仍选中了 `1.3.0` 或旧快照 |
 | 找不到静态 `fromSsh`、`Options.redisCache`、`ServiceTokenFetcher.refresh` 方法 | 这些方法从 `1.3.0` 起提供，检查依赖树是否仍使用 `1.2.1` 或旧快照 |
 | 找不到 `passwordOnly` 方法 | 该方法从 `1.2.0` 起提供，检查依赖树是否仍使用 `1.1.0` 或旧快照 |
@@ -170,4 +173,4 @@ mvn dependency:resolve -Dclassifier=javadoc -DincludeGroupIds=io.github.iskycc
 | `NoSuchMethodError` | 查看依赖树，核对 Gson/HttpClient 等是否被其他依赖或 BOM 覆盖 |
 | TLS 错误、401、403 | 依赖已加载，问题位于集群连接或权限；按 [API 错误处理指南](library-api.md#错误与兼容性)排查 |
 
-仓库当前 `pom.xml` 中的 `1.5.2-SNAPSHOT` 是源码开发构建版本，正式版坐标为 `1.5.2`。本指南不需要修改本仓库 POM 或运行任何发布命令。
+仓库当前 `pom.xml` 中的 `1.5.5-SNAPSHOT` 是源码开发构建版本，正式版坐标为 `1.5.5`。本指南不需要修改本仓库 POM 或运行任何发布命令。

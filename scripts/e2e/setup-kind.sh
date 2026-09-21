@@ -30,6 +30,10 @@ kubectl wait --for=condition=Ready nodes --all --timeout=120s
 # 预加载测试工作负载镜像；避免每次创建 Pod 时依赖外网拉取。
 docker pull registry.k8s.io/pause:3.10
 kind load docker-image registry.k8s.io/pause:3.10 --name k8s-tools-e2e
+# Exec 测试需要实际 shell/命令；pause 镜像没有这些工具。
+# 在节点中预拉取，避免 Docker 的多平台索引在 kind 导入时缺少其他平台的内容。
+docker exec k8s-tools-e2e-control-plane ctr --namespace=k8s.io images pull \
+  --platform linux/amd64 docker.io/library/busybox:1.37.0
 
 ssh_password=$(openssl rand -hex 24)
 redis_password=$(openssl rand -hex 24)

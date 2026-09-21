@@ -1,5 +1,8 @@
 package com.iskycc.k8s.internal;
 
+import com.iskycc.k8s.K8sLogging;
+import org.slf4j.Logger;
+
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -8,6 +11,13 @@ import java.util.concurrent.TimeUnit;
 /** 内部日志格式化工具；不记录凭据、正文、query 或异常消息。 */
 public final class LogSupport {
     private LogSupport() { }
+
+    /** 本库所有 DEBUG 统一经过全局开关，保留各调用类的 logger 名称。 */
+    public static void debug(Logger logger, String format, Object... arguments) {
+        if (K8sLogging.isDebugEnabled() && logger.isDebugEnabled()) {
+            logger.debug(format, arguments);
+        }
+    }
 
     public static long elapsedMs(long started) {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);

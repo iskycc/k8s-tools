@@ -1,6 +1,12 @@
 # 工具库完整性核对
 
-核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.5.2-SNAPSHOT`。
+核对对象是单模块 Java 库及 CLI，通用资源接口从 `1.1.0` 起提供，`1.2.0` 增加仅密码 SSH 模式。当前源码的开发构建版本为 `1.5.5-SNAPSHOT`。
+
+## 1.5.5 Pod Exec 与全局调试开关
+
+`K8sApiClient.exec` / `execShell` 返回 stdout、stderr 和退出码；有 SSH 配置时，AUTO 在执行前探测版本，低于 1.31 使用 SSH/kubectl，其他版本使用 WebSocket；无 SSH 配置则直连 WebSocket。支持容器选择、总超时、输出上限和中断，不在失败后切换通道重放命令，不触发 TLS 降级。无 stdin/TTY 交互功能，详见 [调用指南](pod-exec.md)。
+
+`K8sLogging` 默认关闭 DEBUG，可通过 JVM 属性或运行时方法切换；INFO/WARN/ERROR 保留，每次选定 Exec 通道打印一行 INFO。配置见 [日志指南](logging.md)。
 
 ## 1.5.0 客户端托管 Redis
 
@@ -53,7 +59,7 @@
 | 能力 | 当前边界 |
 | --- | --- |
 | Watch / Informer | 无事件流、断线恢复、缓存和 resourceVersion 续接 |
-| exec / attach / port-forward / 日志跟随 | 无 WebSocket/SPDY 协议升级和流式读取；raw 请求会缓冲整个响应 |
+| 交互式 exec / attach / port-forward / 日志跟随 | 支持 WebSocket / SSH-kubectl 非交互式 exec；无 stdin/TTY、Java 原生 SPDY 或其他流式能力；raw 请求仍缓冲整个响应 |
 | kubeconfig / 集群内自动配置 | 目前直接 API 地址 + Bearer Token + CA，或 SSH 获取 MasterInfo；不解析 kubeconfig 的多 context、exec 插件、客户端证书 |
 | token 自动轮换 | 可通过 token 子资源请求短期 token，但不自动更新客户端凭据；SSH Secret token 也不自动续期 |
 | YAML 多文档与批处理事务 | 写接口接收 JSON；无 YAML 解析器，无跨资源事务或失败回滚 |
